@@ -87,7 +87,7 @@ for i in $(seq 1 101); do
 done
 
 # usage dashboard data
-curl http://localhost:8080/v1/usage/client-a?days=10 -H 'Authorization: Bearer my-secret-key-123'
+curl http://localhost:8080/v1/usage/client-a?range=24h -H 'Authorization: Bearer my-secret-key-123'
 ```
 
 ### Verifying the fail-safe edge case yourself
@@ -161,15 +161,12 @@ of instances behind a load balancer rather than a single process.
 | `POST` | `/v1/check` | `{ clientId, cost? }` → `{ allowed, remaining, retryAfterMs, source }` |
 | `GET` | `/v1/clients` | list configured clients and their limits |
 | `PUT` | `/v1/clients/:clientId` | upsert a client's `name`, `capacity`, `refillRatePerSec` |
-| `GET` | `/v1/usage/:clientId?days=10\|15\|30` | aggregated usage for the dashboard |
+| `GET` | `/v1/usage/:clientId?range=60m\|24h\|7d` | aggregated usage with dynamic time granularity |
 | `GET` | `/healthz` | breaker state + log queue depth |
 | `GET` | `/dashboard/` | static usage dashboard (Chart.js) |
 
 ## Known trade-offs / next steps
 
-- **Dashboard Security:** The current dashboard HTML uses a hardcoded 
-  input for the API key. A real deployment would put this behind proper
-  SSO/OIDC authentication.
 - **Horizontal Scaling Limits:** Redis is extremely fast, but a single
   Redis node limits total cluster throughput. Redis Cluster support would 
   be required to scale beyond ~100k requests/second.
