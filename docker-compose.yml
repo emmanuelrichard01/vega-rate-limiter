@@ -1,0 +1,80 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ratelimiter
+      POSTGRES_PASSWORD: ratelimiter
+      POSTGRES_DB: ratelimiter
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ratelimiter -d ratelimiter"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Two replicas of the exact same image/config demonstrate the "runs in
+  # a cluster, correctness independent of which instance is hit"
+  # requirement: they share nothing except Redis and Postgres.
+  api1:
+    build: .
+    environment: &api_env
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ratelimiter
+      PGPASSWORD: ratelimiter
+      PGDATABASE: ratelimiter
+      PORT: 3000
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/healthz', r => process.exit(r.statusCode===200?0:1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  api2:
+    build: .
+    environment: *api_env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/healthz', r => process.exit(r.statusCode===200?0:1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api1
+      - api2
+
+volumes:
+  pgdata:

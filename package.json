@@ -1,0 +1,37 @@
+{
+  "name": "vega-rate-limiter",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch",
+    "loadtest": "ts-node test/loadtest.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "ioredis": "^5.11.1",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/autocannon": "^7.12.7",
+    "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.1.1",
+    "@types/pg": "^8.20.0",
+    "@types/supertest": "^7.2.1",
+    "autocannon": "^8.0.0",
+    "jest": "^30.4.2",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}
