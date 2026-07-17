@@ -18,8 +18,20 @@ async function main() {
   });
   redis.on('error', (err) => console.error('[redis] connection error', err.message));
 
+  const redisSubscriber = new Redis({
+    host: process.env.REDIS_HOST ?? 'localhost',
+    port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
+  });
+  redisSubscriber.on('error', (err: any) => console.error('[redisSubscriber] connection error', err.message, err.command?.name));
+
+  const redisWorker = new Redis({
+    host: process.env.REDIS_HOST ?? 'localhost',
+    port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
+  });
+  redisWorker.on('error', (err) => console.error('[redisWorker] connection error', err.message));
+
   const limiter = new RateLimiter(redis, {
-    redisTimeoutMs: 20,
+    redisTimeoutMs: 200,
     breakerFailureThreshold: 3,
     breakerCooldownMs: 2000,
   });
@@ -27,20 +39,23 @@ async function main() {
 
   const clientStore = new ClientConfigStore(pool);
   await clientStore.refresh();
-  clientStore.startAutoRefresh(5000);
+  clientStore.listenForUpdates(redisSubscriber);
 
-  const logQueue = new LogQueue(pool, { batchSize: 500, flushIntervalMs: 1000 });
+  const logQueue = new LogQueue(pool, redis, redisWorker, { batchSize: 500, flushIntervalMs: 1000 });
+  await logQueue.init();
   logQueue.startFlusher();
 
   startRollupTimer(pool, 30_000);
 
-  const app = createApp(limiter, clientStore, logQueue, pool);
+  const app = createApp(limiter, clientStore, logQueue, pool, redis);
   const port = parseInt(process.env.PORT ?? '3000', 10);
   app.listen(port, () => console.log(`rate-limiter listening on :${port}`));
 
   process.on('SIGTERM', async () => {
     await logQueue.flush();
     await pool.end();
+    redisWorker.disconnect();
+    redisSubscriber.disconnect();
     redis.disconnect();
     process.exit(0);
   });

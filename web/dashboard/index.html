@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <title>Rate Limiter — Client Usage Dashboard</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
   :root { color-scheme: light; }
   body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; }
@@ -26,6 +26,9 @@
   <div class="sub">Real-time approved/denied traffic and latency, pulled from the rate limiter's async analytics pipeline.</div>
 
   <div class="controls">
+    <label>API Key:
+      <input type="password" id="apiKeyInput" value="my-secret-key-123" />
+    </label>
     <label>Client:
       <select id="clientSelect"></select>
     </label>
@@ -50,7 +53,14 @@
     let chart;
 
     async function loadClients() {
-      const res = await fetch(`${API_BASE}/v1/clients`);
+      const apiKey = document.getElementById('apiKeyInput').value;
+      const res = await fetch(`${API_BASE}/v1/clients`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      if (!res.ok) {
+        document.getElementById('errorBox').textContent = `Failed to load clients: ${res.status}`;
+        return;
+      }
       const clients = await res.json();
       const sel = document.getElementById('clientSelect');
       sel.innerHTML = clients.map(c => `<option value="${c.clientId}">${c.clientId}</option>`).join('');
@@ -64,7 +74,10 @@
       if (!clientId) return;
 
       try {
-        const res = await fetch(`${API_BASE}/v1/usage/${encodeURIComponent(clientId)}?days=${days}`);
+        const apiKey = document.getElementById('apiKeyInput').value;
+        const res = await fetch(`${API_BASE}/v1/usage/${encodeURIComponent(clientId)}?days=${days}`, {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
         if (!res.ok) throw new Error(`API returned ${res.status}`);
         const data = await res.json();
         renderStats(data);

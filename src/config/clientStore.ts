@@ -37,6 +37,24 @@ export class ClientConfigStore {
     return this.timer;
   }
 
+  listenForUpdates(subscriber: import('ioredis').Redis) {
+    // Wait for the connection to be fully ready before subscribing to avoid
+    // conflicting with ioredis's internal INFO/READY commands on startup.
+    subscriber.on('ready', () => {
+      subscriber.subscribe('config:refresh', (err) => {
+        if (err) console.error('[clientStore] failed to subscribe', err);
+      });
+    });
+    subscriber.on('message', (channel, message) => {
+      if (channel === 'config:refresh') {
+        // message is the clientId that was updated, we could fetch just that one, 
+        // but for simplicity we can refresh the whole cache or just that client.
+        // Let's just call refresh() to keep it simple and ensure consistency.
+        this.refresh().catch(err => console.error('[clientStore] refresh failed via pubsub', err));
+      }
+    });
+  }
+
   get(clientId: string): LimitConfig | undefined {
     return this.cache.get(clientId);
   }

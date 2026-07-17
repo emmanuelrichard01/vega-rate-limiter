@@ -9,7 +9,8 @@ export function createApp(
   limiter: RateLimiter,
   clientStore: ClientConfigStore,
   logQueue: LogQueue,
-  pool: Pool
+  pool: Pool,
+  redisPublisher: import('ioredis').Redis
 ): Express {
   const app = express();
   app.use(express.json());
@@ -24,9 +25,19 @@ export function createApp(
     });
   });
 
+  // --- auth middleware ----------------------------------------------
+  const authMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const key = process.env.INTERNAL_API_KEY;
+    if (!key) return next(); // fail open if not configured
+    if (req.headers.authorization !== `Bearer ${key}`) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+    next();
+  };
+
   // --- the hot path ---------------------------------------------------
   // POST /v1/check { clientId, cost? }
-  app.post('/v1/check', async (req, res) => {
+  app.post('/v1/check', authMiddleware, async (req, res) => {
     const start = process.hrtime.bigint();
     const { clientId, cost } = req.body ?? {};
 
@@ -61,24 +72,25 @@ export function createApp(
   });
 
   // --- client admin -----------------------------------------------------
-  app.get('/v1/clients', (_req, res) => {
+  app.get('/v1/clients', authMiddleware, (_req, res) => {
     res.json(clientStore.all());
   });
 
-  app.put('/v1/clients/:clientId', async (req, res) => {
-    const { clientId } = req.params;
+  app.put('/v1/clients/:clientId', authMiddleware, async (req, res) => {
+    const clientId = req.params.clientId as string;
     const { name, capacity, refillRatePerSec } = req.body ?? {};
     if (!name || !capacity || !refillRatePerSec) {
       return res.status(400).json({ error: 'name, capacity, refillRatePerSec are required' });
     }
     await clientStore.upsert({ clientId, capacity, refillRatePerSec }, name);
+    redisPublisher.publish('config:refresh', clientId).catch(err => console.error('[api] config publish failed', err));
     res.status(204).send();
   });
 
   // --- dashboard: usage with filters -------------------------------
   // GET /v1/usage/:clientId?days=10|15|30
   app.get('/v1/usage/:clientId', async (req, res) => {
-    const { clientId } = req.params;
+    const clientId = req.params.clientId as string;
     const days = [10, 15, 30].includes(Number(req.query.days)) ? Number(req.query.days) : 10;
 
     const { rows } = await pool.query(

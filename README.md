@@ -26,14 +26,16 @@ See `diagrams/architecture.png` for the full component diagram.
   "the system must not block all traffic." The breaker self-heals via a
   half-open probe once Redis is reachable again.
 - **Logging is fully decoupled from the hot path.** `POST /v1/check`
-  never awaits a database write — it fires an in-memory enqueue
-  (`src/logging/queue.ts`) and returns immediately. A background timer
-  batches and flushes to Postgres every second. A separate rollup job
-  (`src/logging/rollup.ts`) pre-aggregates into `usage_daily` so
-  dashboard trend queries never scan raw request logs.
+  never awaits a database write — it fires an async `XADD` to a durable
+  Redis Stream (`request_logs`) and returns immediately. A background worker
+  group reads this stream and flushes to Postgres with at-least-once 
+  delivery semantics and `XAUTOCLAIM` crash recovery (`src/logging/queue.ts`).
+  A separate rollup job (`src/logging/rollup.ts`) pre-aggregates into 
+  `usage_daily` so dashboard trend queries never scan raw request logs.
 - **Config:** per-client limits live in Postgres (`clients` table) but
-  are cached in-process and refreshed on a 5s timer, so the check path
-  never does a DB round-trip either.
+  are cached in-process. Updates via the API trigger an immediate refresh
+  across all instances via Redis Pub/Sub (`config:refresh`), so the check
+  path never does a DB round-trip.
 
 ## Verified behavior (not just claimed — see "What's actually been tested" below)
 
@@ -72,16 +74,20 @@ burst 100) and `client-b` (5000 req/min, burst 5000).
 ```bash
 # allowed
 curl -X POST http://localhost:8080/v1/check \
-  -H 'Content-Type: application/json' -d '{"clientId":"client-a"}'
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer my-secret-key-123' \
+  -d '{"clientId":"client-a"}'
 
 # drain the burst, then see a 429
 for i in $(seq 1 101); do
   curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8080/v1/check \
-    -H 'Content-Type: application/json' -d '{"clientId":"client-a"}'
+    -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer my-secret-key-123' \
+    -d '{"clientId":"client-a"}'
 done
 
 # usage dashboard data
-curl http://localhost:8080/v1/usage/client-a?days=10
+curl http://localhost:8080/v1/usage/client-a?days=10 -H 'Authorization: Bearer my-secret-key-123'
 ```
 
 ### Verifying the fail-safe edge case yourself
@@ -89,7 +95,9 @@ curl http://localhost:8080/v1/usage/client-a?days=10
 ```bash
 docker compose stop redis
 curl -X POST http://localhost:8080/v1/check \
-  -H 'Content-Type: application/json' -d '{"clientId":"client-a"}'
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer my-secret-key-123' \
+  -d '{"clientId":"client-a"}'
 # -> still 200/429 as appropriate, with "source": "fallback"
 curl http://localhost:8080/healthz   # -> "breaker": "OPEN"
 
@@ -159,13 +167,9 @@ of instances behind a load balancer rather than a single process.
 
 ## Known trade-offs / next steps
 
-- The async log queue is in-memory per instance; a crash between
-  enqueue and flush (≤1s window) loses that batch's log rows. Billing
-  correctness at scale would want a durable queue (Redis Streams or
-  Kafka) instead — flagged as a deliberate scope cut given the
-  timeline, not an oversight.
-- Client config refresh is poll-based (5s). Fine at this scale; a
-  Postgres `LISTEN/NOTIFY` or Redis pub/sub push would tighten
-  propagation delay if needed.
-- No mTLS/auth between services in this demo compose file — would add
-  an internal auth token or mesh in a real deployment.
+- **Dashboard Security:** The current dashboard HTML uses a hardcoded 
+  input for the API key. A real deployment would put this behind proper
+  SSO/OIDC authentication.
+- **Horizontal Scaling Limits:** Redis is extremely fast, but a single
+  Redis node limits total cluster throughput. Redis Cluster support would 
+  be required to scale beyond ~100k requests/second.

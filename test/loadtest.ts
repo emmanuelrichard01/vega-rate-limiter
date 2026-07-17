@@ -23,7 +23,10 @@ async function main() {
     connections,
     duration: durationSec,
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(process.env.INTERNAL_API_KEY ? { authorization: `Bearer ${process.env.INTERNAL_API_KEY}` } : {}),
+    },
     body: JSON.stringify({ clientId: 'client-b' }),
   });
 

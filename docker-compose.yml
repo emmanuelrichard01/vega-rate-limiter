@@ -41,6 +41,7 @@ services:
       PGPASSWORD: ratelimiter
       PGDATABASE: ratelimiter
       PORT: 3000
+      INTERNAL_API_KEY: my-secret-key-123
     depends_on:
       redis:
         condition: service_healthy

@@ -20,14 +20,18 @@ export class FallbackLimiter {
   private buckets = new Map<string, LocalBucket>();
 
   check(clientId: string, cfg: LimitConfig, cost: number): LimitResult {
+    const multiplier = parseFloat(process.env.FALLBACK_CAPACITY_MULTIPLIER ?? '1');
+    const effectiveCapacity = Math.max(1, Math.floor(cfg.capacity * multiplier));
+    const effectiveRefillRate = cfg.refillRatePerSec * multiplier;
+
     const now = Date.now();
     let b = this.buckets.get(clientId);
     if (!b) {
-      b = { tokens: cfg.capacity, ts: now };
+      b = { tokens: effectiveCapacity, ts: now };
     }
 
     const elapsedSec = Math.max(0, now - b.ts) / 1000;
-    let tokens = Math.min(cfg.capacity, b.tokens + elapsedSec * cfg.refillRatePerSec);
+    let tokens = Math.min(effectiveCapacity, b.tokens + elapsedSec * effectiveRefillRate);
 
     let allowed: boolean;
     let retryAfterMs = 0;
@@ -38,7 +42,7 @@ export class FallbackLimiter {
     } else {
       allowed = false;
       const deficit = cost - tokens;
-      retryAfterMs = Math.ceil((deficit / cfg.refillRatePerSec) * 1000);
+      retryAfterMs = Math.ceil((deficit / effectiveRefillRate) * 1000);
     }
 
     this.buckets.set(clientId, { tokens, ts: now });

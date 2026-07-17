@@ -102,6 +102,7 @@ export class RateLimiter {
           source: 'redis',
         };
       } catch (err) {
+        console.error('[RateLimiter] redis check failed:', err);
         this.breaker.onFailure();
         // fall through to fallback below
       }
