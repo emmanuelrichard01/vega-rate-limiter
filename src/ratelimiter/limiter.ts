@@ -115,6 +115,10 @@ export class RateLimiter {
     return this.breaker.getState();
   }
 
+  simulateOutage(durationMs = 10000) {
+    this.breaker.trip(durationMs);
+  }
+
   startFallbackSweeper(intervalMs = 60_000, maxIdleMs = 10 * 60_000) {
     return setInterval(() => this.fallback.sweep(maxIdleMs), intervalMs);
   }

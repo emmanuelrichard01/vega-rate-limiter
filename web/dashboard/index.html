@@ -2,137 +2,1164 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Rate Limiter — Client Usage Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Vega Rate Limiter — Control Plane</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
-  :root { color-scheme: light; }
-  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; }
-  h1 { font-size: 1.4rem; margin-bottom: 4px; }
-  .sub { color: #666; margin-bottom: 24px; font-size: 0.9rem; }
-  .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
-  select, input { padding: 6px 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 0.9rem; }
-  button { padding: 6px 14px; border-radius: 6px; border: none; background: #2563eb; color: white; cursor: pointer; font-size: 0.9rem; }
-  button:hover { background: #1d4ed8; }
-  .stats { display: flex; gap: 16px; margin: 20px 0; flex-wrap: wrap; }
-  .stat-card { background: #f5f6f8; border-radius: 10px; padding: 14px 18px; min-width: 140px; }
-  .stat-card .label { font-size: 0.75rem; color: #666; text-transform: uppercase; letter-spacing: 0.03em; }
-  .stat-card .value { font-size: 1.5rem; font-weight: 600; margin-top: 4px; }
-  canvas { max-height: 320px; }
-  .error { color: #b91c1c; font-size: 0.9rem; }
+  :root {
+    --bg-color: #000000;
+    --surface-color: #0a0a0a;
+    --surface-border: #222222;
+    --text-primary: #ededed;
+    --text-secondary: #888888;
+    --accent: #ffffff;
+    --accent-hover: #dddddd;
+    --success: #00e676;
+    --danger: #ff3b30;
+    --warning: #ff9500;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    min-height: 100vh;
+    padding: 64px 32px;
+    display: flex;
+    justify-content: center;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .container { max-width: 1100px; width: 100%; margin-top: 32px; }
+
+  /* Global Banner */
+  #globalAlert {
+    display: none;
+    background: var(--danger);
+    color: #fff;
+    text-align: center;
+    padding: 12px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 10000;
+    box-shadow: 0 4px 12px rgba(255, 59, 48, 0.3);
+    animation: slide-down 0.3s ease;
+  }
+  @keyframes slide-down { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+
+  /* Pulsing Dots */
+  .pulse-dot {
+    display: inline-block;
+    width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 8px; vertical-align: middle;
+  }
+  .pulse-dot.green { background: var(--success); box-shadow: 0 0 8px var(--success); }
+  .pulse-dot.red { background: var(--danger); box-shadow: 0 0 8px var(--danger); animation: pulse-red 1.5s infinite; }
+  .pulse-dot.yellow { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+  @keyframes pulse-red { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+
+  /* Settings Dropdown */
+  .settings-btn {
+    background: transparent; border: 1px solid var(--surface-border); color: var(--text-primary);
+    padding: 8px 16px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px;
+    font-size: 0.85rem; font-family: inherit; font-weight: 500; transition: all 0.2s;
+  }
+  .settings-btn:hover { background: var(--surface-border); }
+  .settings-panel {
+    position: absolute; top: 100%; right: 0; margin-top: 8px; width: 300px;
+    background: var(--surface-color); border: 1px solid var(--surface-border); border-radius: 8px;
+    padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 100; display: none; text-align: left;
+  }
+  .settings-panel.open { display: block; animation: fade-in 0.2s ease; }
+
+  /* Typography */
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+    line-height: 1.1;
+  }
+  .sub { color: var(--text-secondary); font-size: 0.95rem; font-weight: 400; letter-spacing: -0.01em; margin-bottom: 32px; }
+
+  /* Health & Global */
+  .top-bar { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 32px; flex-wrap: wrap; gap: 24px; }
+  .health-widget { display: flex; gap: 32px; align-items: center; flex-wrap: wrap; }
+  .health-item { display: flex; flex-direction: column; gap: 4px; text-align: right; }
+  .health-label { color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; }
+  .health-val { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 500; display: flex; align-items: center; justify-content: flex-end;}
+  .status-closed { color: var(--success); }
+  .status-open { color: var(--danger); }
+
+  .danger-btn { background: transparent; border: 1px solid var(--danger); color: var(--danger); padding: 10px 20px; font-size: 0.9rem; border-radius: 6px; cursor: pointer; transition: background 0.2s; white-space: nowrap;}
+  .danger-btn:hover { background: rgba(255,59,48,0.1); }
+  .danger-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 32px; border-bottom: 1px solid var(--surface-border); margin-bottom: 48px; overflow-x: auto; white-space: nowrap; }
+  .tab-btn {
+    background: transparent; border: none; color: var(--text-secondary);
+    font-family: inherit; font-size: 1rem; font-weight: 500; padding: 16px 0;
+    cursor: pointer; border-bottom: 2px solid transparent; transition: color 0.2s;
+  }
+  .tab-btn:hover { color: var(--text-primary); }
+  .tab-btn.active { color: var(--text-primary); border-bottom-color: var(--text-primary); }
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; animation: fade-in 0.3s ease; }
+
+  @keyframes fade-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* Shared UI */
+  .panel {
+    background: var(--surface-color); border: 1px solid var(--surface-border);
+    border-radius: 8px; padding: 32px; margin-bottom: 32px;
+    overflow-x: hidden;
+  }
+  .panel-title { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 8px; }
+  .panel-desc { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 24px; }
+  
+  .controls-row { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 24px; }
+  .control-group { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 240px; }
+  
+  label { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); display: flex; gap: 8px; align-items: center; }
+  .help-text { font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4; }
+  
+  input, select {
+    background: var(--bg-color); border: 1px solid var(--surface-border);
+    color: var(--text-primary); font-family: 'JetBrains Mono', monospace;
+    font-size: 0.95rem; padding: 12px 16px; border-radius: 6px; outline: none; transition: border-color 0.2s;
+    width: 100%;
+  }
+  input:focus, select:focus { border-color: var(--text-secondary); }
+  input:disabled { opacity: 0.5; cursor: not-allowed; }
+  select {
+    appearance: none; padding-right: 32px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23888888'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 12px center; background-size: 16px; cursor: pointer;
+  }
+  option { background: var(--surface-color); color: var(--text-primary); }
+
+  button.primary-btn {
+    background: var(--text-primary); color: var(--bg-color); border: none;
+    padding: 12px 24px; border-radius: 6px; font-family: inherit; font-size: 0.95rem; font-weight: 600;
+    cursor: pointer; transition: opacity 0.2s; white-space: nowrap; margin-top: 8px; display: inline-block;
+  }
+  button.primary-btn:hover { opacity: 0.9; }
+  button.primary-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Analytics Grid */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 24px; margin-bottom: 32px; }
+  .stat-card { border-top: 2px solid var(--surface-border); padding-top: 16px; transition: all 0.3s ease; }
+  .stat-card .label { font-size: 0.8rem; color: var(--text-secondary); font-weight: 500; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat-card .value { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.04em; font-family: 'JetBrains Mono', monospace; transition: color 0.3s ease;}
+
+  /* Skeleton Loader */
+  .skeleton {
+    background: linear-gradient(90deg, var(--surface-border) 25%, #1a1a1a 50%, var(--surface-border) 75%);
+    background-size: 400% 100%;
+    animation: skeleton-loading 1.5s infinite;
+    border-radius: 4px;
+    color: transparent !important;
+    pointer-events: none;
+  }
+  .skeleton * { visibility: hidden; }
+  @keyframes skeleton-loading {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .delta { font-size: 0.75rem; font-weight: 600; padding: 2px 6px; border-radius: 4px; margin-left: 8px; vertical-align: middle;}
+  .delta.up { background: rgba(0, 230, 118, 0.1); color: var(--success); }
+  .delta.down { background: rgba(255, 59, 48, 0.1); color: var(--danger); }
+  
+  .split-charts { display: flex; flex-direction: column; gap: 32px; margin-top: 48px; }
+  .chart-box { background: var(--surface-color); border: 1px solid var(--surface-border); border-radius: 8px; padding: 24px; position: relative; }
+  .chart-box h3 { font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 16px; }
+  .chart-container-split { height: 280px; width: 100%; position: relative; }
+
+  /* Leaderboard */
+  .leaderboard { display: none; margin-top: 32px; background: var(--surface-color); border: 1px solid var(--surface-border); border-radius: 8px; padding: 24px; }
+  .leaderboard.active { display: block; animation: fade-in 0.3s ease; }
+  .leaderboard h3 { font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 16px; }
+  .lb-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--surface-border); }
+  .lb-row:last-child { border-bottom: none; }
+  .lb-client { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; }
+  .lb-val { font-weight: 600; color: var(--danger); }
+
+  /* Charts & Outputs */
+  .code-output {
+    background: var(--bg-color); border: 1px solid var(--surface-border); padding: 24px;
+    border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;
+    color: var(--text-secondary); white-space: pre-wrap; word-wrap: break-word; max-height: 500px; overflow-y: auto; overflow-x: auto;
+  }
+  .highlight { color: var(--text-primary); }
+  
+  /* Pagination */
+  .page-btn {
+    background: transparent; border: 1px solid var(--surface-border); color: var(--text-primary);
+    padding: 6px 12px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 0.8rem; transition: all 0.2s;
+  }
+  .page-btn:hover:not(:disabled) { background: var(--surface-border); }
+  .page-btn.active { background: var(--text-primary); color: var(--bg-color); border-color: var(--text-primary); }
+  .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* Live Log Table */
+  .table-wrapper { overflow-x: auto; width: 100%; }
+  table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; min-width: 600px; }
+  th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--surface-border); }
+  th { color: var(--text-secondary); font-weight: 500; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+  .pill { padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; display: inline-block; text-align: center; }
+  .pill.green { background: rgba(0, 230, 118, 0.1); color: var(--success); }
+  .pill.red { background: rgba(255, 59, 48, 0.1); color: var(--danger); }
+
+  /* Toasts */
+  #toastContainer { position: fixed; bottom: 32px; right: 32px; display: flex; flex-direction: column; gap: 16px; z-index: 9999; }
+  .toast {
+    background: var(--text-primary); color: var(--bg-color); padding: 16px 24px; border-radius: 6px;
+    font-size: 0.95rem; font-weight: 500; animation: slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 12px;
+  }
+  @keyframes slide-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 </style>
 </head>
 <body>
-  <h1>Client Usage Dashboard</h1>
-  <div class="sub">Real-time approved/denied traffic and latency, pulled from the rate limiter's async analytics pipeline.</div>
+  <div id="globalAlert">CRITICAL: Redis Connection Lost. Circuit Breaker OPEN. Rate limits operating in Fallback Mode.</div>
 
-  <div class="controls">
-    <label>API Key:
-      <input type="password" id="apiKeyInput" value="my-secret-key-123" />
-    </label>
-    <label>Client:
-      <select id="clientSelect"></select>
-    </label>
-    <label>Range:
-      <select id="rangeSelect">
-        <option value="10">Last 10 days</option>
-        <option value="15">Last 15 days</option>
-        <option value="30">Last 30 days</option>
-      </select>
-    </label>
-    <button id="refreshBtn">Refresh</button>
+  <div class="container">
+    <div class="top-bar" style="position: relative;">
+      <div>
+        <h1>Vega Control Plane</h1>
+        <div class="sub">High-performance rate limiter telemetry and management.</div>
+      </div>
+      <div class="health-widget">
+        <div class="health-item">
+          <span class="health-label">Redis Status</span>
+          <span class="health-val status-closed" id="hwBreaker"><span class="pulse-dot green"></span>ACTIVE</span>
+        </div>
+        <div class="health-item">
+          <span class="health-label">Stream Queue</span>
+          <span class="health-val" id="hwQueue"><span class="pulse-dot green"></span>0</span>
+        </div>
+        <div style="position: relative;">
+          <button class="settings-btn" onclick="toggleSettings()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            Auth Settings
+          </button>
+          <div class="settings-panel" id="settingsPanel">
+            <div class="control-group">
+              <label style="margin-bottom: 8px;">Master API Key</label>
+              <div class="help-text" style="margin-bottom: 12px;">Used to authenticate with the administrative API.</div>
+              <input type="password" id="apiKeyInput" value="my-secret-key-123" placeholder="Bearer Token" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('tab-analytics')">Analytics</button>
+      <button class="tab-btn" onclick="switchTab('tab-manage')">Manage Clients</button>
+      <button class="tab-btn" onclick="switchTab('tab-tester')">Simulations</button>
+      <button class="tab-btn" onclick="switchTab('tab-live')">Live Activity</button>
+    </div>
+
+    <!-- TAB 1: Analytics -->
+    <div id="tab-analytics" class="tab-pane active">
+      <div class="controls-row">
+        <div class="control-group">
+          <label>Target Client</label>
+          <select id="clientSelect">
+             <option value="all">Global (All Clients)</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>Time Range</label>
+          <select id="rangeSelect">
+            <option value="60m">Last 60 Minutes (Minutely)</option>
+            <option value="24h">Last 24 Hours (Hourly)</option>
+            <option value="7d">Last 7 Days (Daily)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="stats-grid" id="statsBox">
+        <div class="stat-card skeleton"><div class="label">Total Requests</div><div class="value">00000</div></div>
+        <div class="stat-card skeleton"><div class="label">Allowed</div><div class="value">00000</div></div>
+        <div class="stat-card skeleton"><div class="label">Rate Limited</div><div class="value">00000</div></div>
+        <div class="stat-card skeleton"><div class="label">Rejection Rate</div><div class="value">00000</div></div>
+      </div>
+
+      <div class="leaderboard" id="leaderboardWidget">
+        <h3>Top Rate-Limited Clients (Deny Count)</h3>
+        <div id="leaderboardContent" class="skeleton" style="min-height: 100px;"></div>
+      </div>
+
+      <div class="split-charts">
+        <div class="chart-box">
+          <h3>Traffic Volume</h3>
+          <div class="chart-container-split skeleton" id="trafficChartWrapper"><canvas id="trafficChart"></canvas></div>
+        </div>
+        <div class="chart-box">
+          <h3>P95 Latency (ms)</h3>
+          <div class="chart-container-split skeleton" id="latencyChartWrapper"><canvas id="latencyChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: Manage Clients -->
+    <div id="tab-manage" class="tab-pane">
+      <div class="panel" id="clientFormPanel">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+          <div>
+            <h2 class="panel-title" id="formTitle">Register New Client</h2>
+            <p class="panel-desc" id="formDesc" style="margin-bottom: 0;">Configure a new token bucket to control API usage.</p>
+          </div>
+          <button class="page-btn" id="btnCancelEdit" style="display: none;" onclick="resetClientForm()">Cancel Edit</button>
+        </div>
+        <form onsubmit="handleUpsert(event)" id="clientForm">
+          <div class="controls-row">
+            <div class="control-group">
+              <label>Client ID</label>
+              <div class="help-text">A unique identifier (e.g., API key hash or tenant ID).</div>
+              <input type="text" id="upClientId" required placeholder="e.g. client-c" />
+            </div>
+            <div class="control-group">
+              <label>Display Name</label>
+              <div class="help-text">Human-readable name for analytics.</div>
+              <input type="text" id="upName" required placeholder="e.g. ACME Corp" />
+            </div>
+          </div>
+          <div class="controls-row">
+            <div class="control-group">
+              <label>Capacity (Max Burst)</label>
+              <div class="help-text">The maximum number of tokens this client can hold at once.</div>
+              <input type="number" id="upCap" required min="1" placeholder="e.g. 100" />
+            </div>
+            <div class="control-group">
+              <label>Refill Rate / Sec</label>
+              <div class="help-text">How many tokens are added every second.</div>
+              <input type="number" id="upRefill" required min="1" placeholder="e.g. 10" />
+            </div>
+          </div>
+          <button type="submit" class="primary-btn" id="btnSaveConfig">Save Configuration</button>
+        </form>
+      </div>
+      
+      <div class="panel" style="padding: 0; overflow: hidden; border-radius: 8px;">
+        <div style="padding: 16px 24px; border-bottom: 1px solid var(--surface-border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+          <h2 style="font-size: 1.1rem; font-weight: 600; margin: 0;">Active Configurations</h2>
+          <input type="text" id="clientSearch" placeholder="Search clients by ID or Name..." style="width: 250px; padding: 6px 12px; font-size: 0.85rem;" onkeyup="renderClientsTable()">
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th style="cursor: pointer;" onclick="sortClients('clientId')">Client ID <span id="sort-clientId"></span></th>
+                <th style="cursor: pointer;" onclick="sortClients('name')">Display Name <span id="sort-name"></span></th>
+                <th style="cursor: pointer;" onclick="sortClients('capacity')">Capacity <span id="sort-capacity"></span></th>
+                <th style="cursor: pointer;" onclick="sortClients('refillRatePerSec')">Refill Rate <span id="sort-refillRatePerSec"></span></th>
+                <th style="text-align: right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="clientsTableBody">
+              <tr><td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 32px;">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: Simulations -->
+    <div id="tab-tester" class="tab-pane">
+      <div class="panel">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+          <div>
+            <h2 class="panel-title">Traffic Simulator</h2>
+            <p class="panel-desc" style="margin-bottom: 0;">Execute specialized load patterns to observe rate limiting in action.</p>
+          </div>
+        </div>
+
+        <form onsubmit="handleSimulation(event)" id="simForm">
+          <div class="controls-row">
+            <div class="control-group">
+              <label>Simulation Profile</label>
+              <div class="help-text">Select the type of traffic pattern.</div>
+              <select id="simProfile" onchange="toggleSimProfile()">
+                <option value="spike">Sudden Spike (Burst)</option>
+                <option value="sustained">Sustained Flow (Trickle)</option>
+              </select>
+            </div>
+            <div class="control-group">
+              <label>Target Client</label>
+              <div class="help-text">The client ID to target.</div>
+              <select id="simClientSelect"></select>
+            </div>
+          </div>
+
+          <div class="controls-row">
+            <div class="control-group" id="groupTotalReq">
+              <label>Total Requests</label>
+              <div class="help-text">Total requests to execute.</div>
+              <input type="number" id="simCount" value="100" min="1" max="2000" />
+            </div>
+            <div class="control-group" id="groupRps" style="display: none;">
+              <label>Requests per Second (RPS)</label>
+              <div class="help-text">Rate to sustain the flow.</div>
+              <input type="number" id="simRps" value="10" min="1" max="100" />
+            </div>
+            <div class="control-group">
+              <label>Cost per Request</label>
+              <div class="help-text">Tokens consumed per single request.</div>
+              <input type="number" id="simCost" value="1" min="1" />
+            </div>
+          </div>
+          
+          <button type="submit" class="primary-btn" id="btnRunSim">Launch Simulation</button>
+        </form>
+
+        <!-- Live Telemetry (Hidden until run) -->
+        <div id="simLiveDash" style="display: none; margin-top: 32px; border-top: 1px solid var(--surface-border); padding-top: 24px;">
+          <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 16px;">Live Execution</h3>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="font-size: 0.85rem; color: var(--text-secondary);">Progress: <span id="simProgText" class="highlight">0 / 0</span></div>
+            <div id="simStatus" style="font-size: 0.85rem; font-weight: 600; color: var(--warning);">Running...</div>
+          </div>
+          <div style="width: 100%; height: 8px; background: var(--surface-color); border: 1px solid var(--surface-border); border-radius: 4px; overflow: hidden; margin-bottom: 24px;">
+            <div id="simProgBar" style="height: 100%; width: 0%; background: var(--text-primary); transition: width 0.1s linear;"></div>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-card" style="border-top-color: transparent;"><div class="label">Sent</div><div class="value" id="simSent">0</div></div>
+            <div class="stat-card" style="border-top-color: transparent;"><div class="label">Allowed</div><div class="value" id="simAllowed" style="color: var(--success)">0</div></div>
+            <div class="stat-card" style="border-top-color: transparent;"><div class="label">Denied (429)</div><div class="value" id="simDenied" style="color: var(--danger)">0</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Post-Run Report -->
+      <div class="panel" id="simReportPanel" style="display: none;">
+        <h2 class="panel-title">Post-Run Report</h2>
+        <p class="panel-desc">Final analytics for the executed simulation load.</p>
+        <div style="display: flex; flex-wrap: wrap; gap: 32px; margin-top: 24px;">
+          <div style="width: 250px; height: 250px;">
+            <canvas id="simDonutChart"></canvas>
+          </div>
+          <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 16px;">
+             <div><div class="label" style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">Duration</div><div class="value" id="simRepDuration" style="font-size: 1.5rem; font-family: 'JetBrains Mono', monospace;">0.00s</div></div>
+             <div><div class="label" style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">Avg Latency</div><div class="value" id="simRepLatency" style="font-size: 1.5rem; font-family: 'JetBrains Mono', monospace;">0.00ms</div></div>
+             <div><div class="label" style="font-size: 0.8rem; color: var(--text-secondary); text-transform: uppercase;">Effective RPS</div><div class="value" id="simRepRps" style="font-size: 1.5rem; font-family: 'JetBrains Mono', monospace;">0 req/s</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Infrastructure Chaos -->
+      <div class="panel" style="margin-top: 32px; border-color: rgba(255, 59, 48, 0.3);">
+        <h2 class="panel-title" style="color: var(--danger);">Infrastructure Chaos</h2>
+        <p class="panel-desc">Simulate critical infrastructure failures to test system resilience and fallback behaviors.</p>
+        <div style="display: flex; gap: 24px; align-items: center; background: rgba(255, 59, 48, 0.05); padding: 24px; border-radius: 6px; border: 1px dashed rgba(255, 59, 48, 0.3);">
+          <div style="flex: 1;">
+            <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 4px;">Simulate Redis Failure</div>
+            <div style="font-size: 0.85rem; color: var(--text-secondary);">Forces the system into a degraded state by tripping the circuit breaker for 10 seconds. Rate limits will auto-allow traffic.</div>
+          </div>
+          <button class="danger-btn" id="btnTripBreaker" onclick="tripBreaker()">Trip Circuit Breaker</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: Live Activity -->
+    <div id="tab-live" class="tab-pane">
+      <div class="panel" style="padding: 0; overflow: hidden; border-radius: 8px;">
+        <div style="padding: 16px 24px; border-bottom: 1px solid var(--surface-border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+          <h2 style="font-size: 1.1rem; font-weight: 600; margin: 0;">Request Logs</h2>
+          <div style="display: flex; gap: 16px; align-items: center;">
+            <select id="logClientFilter" style="padding: 6px 12px; font-size: 0.85rem; width: auto;" onchange="currentLogPage=1; fetchLiveLogs()">
+              <option value="all">All Clients</option>
+            </select>
+            <select id="logStatusFilter" style="padding: 6px 12px; font-size: 0.85rem; width: auto;" onchange="currentLogPage=1; fetchLiveLogs()">
+              <option value="all">All Statuses</option>
+              <option value="allowed">Allowed</option>
+              <option value="denied">Denied (429)</option>
+            </select>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer; color: var(--text-secondary);">
+              <input type="checkbox" id="liveToggle" checked onchange="toggleLive()" style="width: auto; margin: 0;">
+              Live Auto-Refresh
+            </label>
+            <button class="primary-btn" style="padding: 6px 16px; margin: 0; font-size: 0.85rem;" onclick="fetchLiveLogs()">Refresh</button>
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Client ID</th>
+                <th>Status</th>
+                <th>Latency</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody id="liveLogBody">
+              <tr><td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 32px;">Waiting for traffic...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="padding: 16px 24px; border-top: 1px solid var(--surface-border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+          <div id="pageInfo" style="font-size: 0.85rem; color: var(--text-secondary);">Showing 0-0 of 0</div>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <select id="limitSelect" onchange="changeLimit()" style="width: auto; padding: 6px 32px 6px 12px; font-size: 0.85rem; margin-right: 16px;">
+              <option value="10">10 / page</option>
+              <option value="25">25 / page</option>
+              <option value="50">50 / page</option>
+            </select>
+            <button class="page-btn" id="btnPrev" onclick="changePage(-1)">Prev</button>
+            <span id="pageNumbers" style="display: flex; gap: 4px;"></span>
+            <button class="page-btn" id="btnNext" onclick="changePage(1)">Next</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
-  <div id="errorBox" class="error"></div>
-
-  <div class="stats" id="statsBox"></div>
-
-  <canvas id="trendChart"></canvas>
+  <div id="toastContainer"></div>
 
   <script>
     const API_BASE = '';
-    let chart;
+    let trafficChart;
+    let latencyChart;
+    let liveInterval = null;
 
-    async function loadClients() {
-      const apiKey = document.getElementById('apiKeyInput').value;
-      const res = await fetch(`${API_BASE}/v1/clients`, {
-        headers: { 'Authorization': `Bearer ${apiKey}` }
-      });
-      if (!res.ok) {
-        document.getElementById('errorBox').textContent = `Failed to load clients: ${res.status}`;
-        return;
+    Chart.defaults.color = '#888888';
+    Chart.defaults.font.family = "'Inter', sans-serif";
+
+    function toggleSettings() {
+       document.getElementById('settingsPanel').classList.toggle('open');
+    }
+    
+    document.addEventListener('click', (e) => {
+       const panel = document.getElementById('settingsPanel');
+       if (panel.classList.contains('open') && !e.target.closest('.settings-panel') && !e.target.closest('.settings-btn')) {
+           panel.classList.remove('open');
+       }
+    });
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+      event.target.classList.add('active');
+      
+      if (liveInterval) { clearInterval(liveInterval); liveInterval = null; }
+
+      if (tabId === 'tab-analytics') loadUsage();
+      if (tabId === 'tab-manage') refreshClientsData();
+      if (tabId === 'tab-tester') refreshClientsData();
+      if (tabId === 'tab-live') { 
+        fetchLiveLogs(); 
+        liveInterval = setInterval(() => {
+          if (isLive) fetchLiveLogs();
+        }, 2000); 
       }
-      const clients = await res.json();
-      const sel = document.getElementById('clientSelect');
-      sel.innerHTML = clients.map(c => `<option value="${c.clientId}">${c.clientId}</option>`).join('');
+    }
+
+    function showToast(msg) {
+      const cont = document.getElementById('toastContainer');
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--success);"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        <span>${msg}</span>
+      `;
+      cont.appendChild(t);
+      setTimeout(() => t.remove(), 4000);
+    }
+    
+    function showErrorToast(msg) {
+      const cont = document.getElementById('toastContainer');
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--danger);"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+        <span>${msg}</span>
+      `;
+      cont.appendChild(t);
+      setTimeout(() => t.remove(), 4000);
+    }
+
+    function getAuth() { return { 'Authorization': `Bearer ${document.getElementById('apiKeyInput').value}` }; }
+
+    async function pollHealth() {
+      try {
+        const res = await fetch(`${API_BASE}/healthz`);
+        if (res.ok) {
+          const data = await res.json();
+          
+          const brk = document.getElementById('hwBreaker');
+          const isClosed = data.breaker === 'CLOSED';
+          const brkDot = isClosed ? '<span class="pulse-dot green"></span>' : '<span class="pulse-dot red"></span>';
+          brk.innerHTML = `${brkDot}${isClosed ? 'ACTIVE' : 'FALLBACK (OPEN)'}`;
+          brk.className = 'health-val ' + (isClosed ? 'status-closed' : 'status-open');
+          
+          const globalAlert = document.getElementById('globalAlert');
+          if (!isClosed) {
+             globalAlert.style.display = 'block';
+          } else {
+             globalAlert.style.display = 'none';
+          }
+
+          const qVal = data.logQueue?.buffered || 0;
+          let qColor = 'green';
+          if(qVal > 50) qColor = 'yellow';
+          if(qVal > 200) qColor = 'red';
+          const qDot = `<span class="pulse-dot ${qColor}"></span>`;
+          document.getElementById('hwQueue').innerHTML = `${qDot}${qVal.toLocaleString()}`;
+        }
+      } catch (e) {}
+    }
+    setInterval(pollHealth, 2000); pollHealth();
+
+    async function tripBreaker() {
+      const btn = document.getElementById('btnTripBreaker');
+      const ogText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Simulating...';
+      try {
+        await fetch(`${API_BASE}/v1/admin/trip-breaker`, { method: 'POST', headers: getAuth() });
+        showToast('Redis Failure Simulated. Breaker tripped for 10s.');
+        pollHealth();
+      } catch (e) { 
+        showErrorToast('Failed to trigger simulation.'); 
+      } finally {
+        btn.disabled = false;
+        btn.textContent = ogText;
+      }
+    }
+
+    // --- Manage Clients Logic ---
+    let _allClients = [];
+
+    function resetClientForm() {
+      document.getElementById('clientForm').reset();
+      document.getElementById('upClientId').disabled = false;
+      document.getElementById('formTitle').textContent = 'Register New Client';
+      document.getElementById('formDesc').textContent = 'Configure a new token bucket to control API usage.';
+      document.getElementById('btnCancelEdit').style.display = 'none';
+      document.getElementById('btnSaveConfig').textContent = 'Save Configuration';
+    }
+
+    function editClient(clientId) {
+      const c = _allClients.find(x => x.clientId === clientId);
+      if(!c) return;
+      document.getElementById('upClientId').value = c.clientId;
+      document.getElementById('upClientId').disabled = true;
+      document.getElementById('upName').value = c.name;
+      document.getElementById('upCap').value = c.capacity;
+      document.getElementById('upRefill').value = c.refillRatePerSec;
+      
+      document.getElementById('formTitle').textContent = `Updating Client: ${c.clientId}`;
+      document.getElementById('formDesc').textContent = `Modify existing limits for ${c.name}.`;
+      document.getElementById('btnCancelEdit').style.display = 'block';
+      document.getElementById('btnSaveConfig').textContent = 'Update Limits';
+      
+      document.getElementById('clientFormPanel').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    async function deleteClient(clientId) {
+      if(!confirm(`Are you sure you want to permanently delete the rate limits for ${clientId}? This cannot be undone.`)) return;
+      try {
+        const res = await fetch(`${API_BASE}/v1/clients/${encodeURIComponent(clientId)}`, {
+          method: 'DELETE', headers: getAuth()
+        });
+        if(res.ok) {
+           showToast(`Deleted client ${clientId}`);
+           if(document.getElementById('upClientId').value === clientId) resetClientForm();
+           refreshClientsData();
+        } else {
+           showErrorToast('Failed to delete client.');
+        }
+      } catch(e) {
+        showErrorToast('Network error while deleting.');
+      }
+    }
+
+    async function handleUpsert(e) {
+      e.preventDefault();
+      const btn = document.getElementById('btnSaveConfig');
+      const ogText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      
+      const id = document.getElementById('upClientId').value;
+      const body = {
+        name: document.getElementById('upName').value,
+        capacity: Number(document.getElementById('upCap').value),
+        refillRatePerSec: Number(document.getElementById('upRefill').value)
+      };
+      try {
+        const res = await fetch(`${API_BASE}/v1/clients/${encodeURIComponent(id)}`, {
+          method: 'PUT', headers: { ...getAuth(), 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        if (res.ok) { 
+          showToast('Client limits successfully saved.'); 
+          resetClientForm();
+          refreshClientsData(); 
+        } else {
+          showErrorToast('Failed to save client limits.');
+        }
+      } catch (e) {
+        showErrorToast('Network error while saving.');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = ogText;
+      }
+    }
+
+    let currentSortCol = 'clientId';
+    let currentSortAsc = true;
+
+    function sortClients(col) {
+      if (currentSortCol === col) {
+        currentSortAsc = !currentSortAsc;
+      } else {
+        currentSortCol = col;
+        currentSortAsc = true;
+      }
+      renderClientsTable();
+    }
+
+    function renderClientsTable() {
+      const tbody = document.getElementById('clientsTableBody');
+      if (!tbody) return;
+
+      const q = (document.getElementById('clientSearch')?.value || '').toLowerCase();
+      
+      let filtered = _allClients.filter(c => 
+         c.clientId.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
+      );
+
+      filtered.sort((a, b) => {
+        let valA = a[currentSortCol];
+        let valB = b[currentSortCol];
+        if (typeof valA === 'string') {
+          return currentSortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        } else {
+          return currentSortAsc ? valA - valB : valB - valA;
+        }
+      });
+
+      ['clientId', 'name', 'capacity', 'refillRatePerSec'].forEach(c => {
+         const el = document.getElementById(`sort-${c}`);
+         if(el) el.textContent = (currentSortCol === c) ? (currentSortAsc ? '↑' : '↓') : '';
+      });
+
+      if(filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 32px;">No configurations match your search.</td></tr>';
+      } else {
+        tbody.innerHTML = filtered.map(c => `
+          <tr>
+            <td><span class="highlight">${c.clientId}</span></td>
+            <td>${c.name}</td>
+            <td><span class="pill" style="background: var(--surface-color); border: 1px solid var(--surface-border);">${c.capacity.toLocaleString()}</span></td>
+            <td><span class="pill" style="background: var(--surface-color); border: 1px solid var(--surface-border);">${c.refillRatePerSec.toLocaleString()} / sec</span></td>
+            <td style="text-align: right;">
+              <button class="page-btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="editClient('${c.clientId}')">Edit</button>
+              <button class="page-btn" style="padding: 4px 8px; font-size: 0.75rem; color: var(--danger); border-color: rgba(255, 59, 48, 0.3);" onclick="deleteClient('${c.clientId}')">Delete</button>
+            </td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    async function refreshClientsData() {
+      try {
+        const res = await fetch(`${API_BASE}/v1/clients`, { headers: getAuth() });
+        if (!res.ok) return;
+        const clients = await res.json();
+        _allClients = clients;
+        
+        renderClientsTable();
+        
+        // Update analytics dropdown
+        const sel = document.getElementById('clientSelect');
+        if (sel) {
+            const currentVal = sel.value;
+            const opts = `<option value="all">Global (All Clients)</option>` + clients.map(c => `<option value="${c.clientId}">${c.clientId}</option>`).join('');
+            sel.innerHTML = opts;
+            if (currentVal && (currentVal === 'all' || clients.find(c => c.clientId === currentVal))) {
+                sel.value = currentVal;
+            } else {
+                sel.value = 'all';
+            }
+        }
+
+        // Update live logs dropdown
+        const logSel = document.getElementById('logClientFilter');
+        if (logSel) {
+            const logCurrentVal = logSel.value;
+            const logOpts = `<option value="all">All Clients</option>` + clients.map(c => `<option value="${c.clientId}">${c.clientId}</option>`).join('');
+            logSel.innerHTML = logOpts;
+            if (logCurrentVal && (logCurrentVal === 'all' || clients.find(c => c.clientId === logCurrentVal))) logSel.value = logCurrentVal;
+        }
+
+        // Update simulations dropdown
+        const testSel = document.getElementById('simClientSelect');
+        if (testSel) {
+            const testCurrentVal = testSel.value;
+            const testOpts = clients.map(c => `<option value="${c.clientId}">${c.clientId}</option>`).join('');
+            testSel.innerHTML = testOpts;
+            if (testCurrentVal && clients.find(c => c.clientId === testCurrentVal)) testSel.value = testCurrentVal;
+            else if (clients.length > 0) testSel.value = clients[0].clientId;
+        }
+      } catch (e) {}
+    }
+
+    // --- Simulations Logic ---
+    function toggleSimProfile() {
+      const isSustained = document.getElementById('simProfile').value === 'sustained';
+      document.getElementById('groupRps').style.display = isSustained ? 'flex' : 'none';
+      if(isSustained) {
+         document.getElementById('simCount').value = "50";
+      }
+    }
+
+    let simActive = false;
+    let simDonut = null;
+
+    function lockUI(locked) {
+      simActive = locked;
+      document.getElementById('btnRunSim').disabled = locked;
+      document.getElementById('btnRunSim').textContent = locked ? 'Running...' : 'Launch Simulation';
+      document.querySelectorAll('.tab-btn').forEach(b => {
+          b.style.pointerEvents = locked ? 'none' : 'auto';
+          b.style.opacity = locked && !b.classList.contains('active') ? '0.5' : '1';
+      });
+    }
+
+    async function handleSimulation(e) {
+      e.preventDefault();
+      if (simActive) return;
+      lockUI(true);
+
+      const profile = document.getElementById('simProfile').value;
+      const clientId = document.getElementById('simClientSelect').value;
+      const totalCount = Number(document.getElementById('simCount').value);
+      const cost = Number(document.getElementById('simCost').value);
+      const rps = Number(document.getElementById('simRps').value);
+
+      document.getElementById('simLiveDash').style.display = 'block';
+      document.getElementById('simReportPanel').style.display = 'none';
+      
+      const elProgText = document.getElementById('simProgText');
+      const elProgBar = document.getElementById('simProgBar');
+      const elSent = document.getElementById('simSent');
+      const elAllowed = document.getElementById('simAllowed');
+      const elDenied = document.getElementById('simDenied');
+      const elStatus = document.getElementById('simStatus');
+
+      elStatus.textContent = 'Running...';
+      elStatus.style.color = 'var(--warning)';
+
+      let sent = 0, allowed = 0, denied = 0;
+      let totalLatency = 0;
+      
+      const updateUI = () => {
+         elProgText.textContent = `${sent} / ${totalCount}`;
+         elProgBar.style.width = `${(sent / totalCount) * 100}%`;
+         elSent.textContent = sent;
+         elAllowed.textContent = allowed;
+         elDenied.textContent = denied;
+      };
+      updateUI();
+
+      const runRequest = async () => {
+        const start = performance.now();
+        try {
+          const res = await fetch(`${API_BASE}/v1/check`, {
+            method: 'POST', headers: { ...getAuth(), 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId, cost })
+          });
+          totalLatency += (performance.now() - start);
+          if (res.ok) allowed++; else denied++;
+        } catch(e) { denied++; }
+        sent++;
+        if (sent % 10 === 0) updateUI();
+      };
+
+      const simStartTime = performance.now();
+
+      if (profile === 'spike') {
+        const chunkSize = 25;
+        for (let i = 0; i < totalCount; i += chunkSize) {
+           const chunk = Math.min(chunkSize, totalCount - i);
+           await Promise.all(Array.from({length: chunk}).map(runRequest));
+           updateUI();
+        }
+      } else if (profile === 'sustained') {
+        const delayMs = 1000 / rps;
+        for (let i = 0; i < totalCount; i++) {
+           runRequest();
+           updateUI();
+           await new Promise(r => setTimeout(r, delayMs));
+        }
+        while (sent < totalCount) await new Promise(r => setTimeout(r, 50));
+      }
+
+      updateUI();
+      const durationMs = performance.now() - simStartTime;
+      const durationSec = durationMs / 1000;
+
+      elStatus.textContent = 'Complete';
+      elStatus.style.color = 'var(--success)';
+
+      document.getElementById('simReportPanel').style.display = 'block';
+      document.getElementById('simRepDuration').textContent = `${durationSec.toFixed(2)}s`;
+      document.getElementById('simRepLatency').textContent = `${(totalCount > 0 ? (totalLatency / totalCount) : 0).toFixed(2)}ms`;
+      document.getElementById('simRepRps').textContent = `${(totalCount / durationSec).toFixed(1)} req/s`;
+
+      if (simDonut) simDonut.destroy();
+      simDonut = new Chart(document.getElementById('simDonutChart'), {
+        type: 'doughnut',
+        data: {
+          labels: ['Allowed', 'Denied'],
+          datasets: [{ data: [allowed, denied], backgroundColor: ['#00e676', '#ff3b30'], borderWidth: 0, cutout: '75%' }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true, color: '#ededed' } } }
+        }
+      });
+
+      lockUI(false);
+      showToast('Simulation complete.');
+    }
+
+    // --- Pagination Logic ---
+    let currentLogPage = 1;
+    let currentLogLimit = 10;
+    let isLive = true;
+
+    function toggleLive() {
+      isLive = document.getElementById('liveToggle').checked;
+      if (isLive) {
+        currentLogPage = 1;
+        fetchLiveLogs();
+      }
+    }
+
+    function changeLimit() {
+      currentLogLimit = Number(document.getElementById('limitSelect').value);
+      currentLogPage = 1;
+      fetchLiveLogs();
+    }
+
+    function changePage(delta) {
+      currentLogPage += delta;
+      disableLive();
+      fetchLiveLogs();
+    }
+
+    function goToPage(p) {
+      currentLogPage = p;
+      disableLive();
+      fetchLiveLogs();
+    }
+
+    function disableLive() {
+      if (currentLogPage > 1) {
+        isLive = false;
+        document.getElementById('liveToggle').checked = false;
+      }
+    }
+
+    async function fetchLiveLogs() {
+      try {
+        const clientIdParam = document.getElementById('logClientFilter')?.value || 'all';
+        const statusParam = document.getElementById('logStatusFilter')?.value || 'all';
+        const res = await fetch(`${API_BASE}/v1/logs?page=${currentLogPage}&limit=${currentLogLimit}&clientId=${encodeURIComponent(clientIdParam)}&status=${statusParam}`, { headers: getAuth() });
+        if (!res.ok) return;
+        const { data, meta } = await res.json();
+        
+        const tbody = document.getElementById('liveLogBody');
+        if (data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 32px;">No records found matching filters.</td></tr>';
+          document.getElementById('pageInfo').textContent = 'Showing 0-0 of 0';
+          document.getElementById('pageNumbers').innerHTML = '';
+          return;
+        }
+        
+        tbody.innerHTML = data.map(r => {
+          let latColor = '';
+          const lat = Number(r.latency_ms);
+          if (lat > 20) latColor = 'color: var(--danger); font-weight: 600;';
+          else if (lat > 5) latColor = 'color: var(--warning); font-weight: 600;';
+          
+          return `
+            <tr>
+              <td style="color: var(--text-secondary)">${new Date(r.occurred_at).toLocaleTimeString()}</td>
+              <td><span class="highlight">${r.client_id}</span></td>
+              <td><span class="pill ${r.allowed ? 'green' : 'red'}">${r.allowed ? 'ALLOWED' : 'DENIED'}</span></td>
+              <td style="${latColor}">${lat.toFixed(2)}ms</td>
+              <td>${r.source}</td>
+            </tr>
+          `;
+        }).join('');
+
+        const start = (meta.page - 1) * meta.limit + 1;
+        const end = Math.min(meta.page * meta.limit, meta.total);
+        document.getElementById('pageInfo').textContent = `Showing ${start}-${end} of ${meta.total.toLocaleString()}`;
+        
+        document.getElementById('btnPrev').disabled = meta.page <= 1;
+        document.getElementById('btnNext').disabled = meta.page >= meta.totalPages;
+        
+        let pageHtml = '';
+        const startPage = Math.max(1, meta.page - 2);
+        const endPage = Math.min(meta.totalPages, startPage + 4);
+        for(let i = startPage; i <= endPage; i++) {
+          if (i === meta.page) {
+            pageHtml += `<button class="page-btn active">${i}</button>`;
+          } else {
+            pageHtml += `<button class="page-btn" onclick="goToPage(${i})">${i}</button>`;
+          }
+        }
+        document.getElementById('pageNumbers').innerHTML = pageHtml;
+      } catch (e) {}
     }
 
     async function loadUsage() {
       const clientId = document.getElementById('clientSelect').value;
-      const days = document.getElementById('rangeSelect').value;
-      const errorBox = document.getElementById('errorBox');
-      errorBox.textContent = '';
       if (!clientId) return;
+      const range = document.getElementById('rangeSelect').value;
+
+      document.querySelectorAll('#statsBox .stat-card').forEach(el => el.classList.add('skeleton'));
+      document.getElementById('trafficChartWrapper').classList.add('skeleton');
+      document.getElementById('latencyChartWrapper').classList.add('skeleton');
+      
+      const lbWidget = document.getElementById('leaderboardWidget');
+      if (clientId === 'all') {
+        lbWidget.classList.add('active');
+        document.getElementById('leaderboardContent').classList.add('skeleton');
+        document.getElementById('leaderboardContent').innerHTML = '';
+      } else {
+        lbWidget.classList.remove('active');
+      }
 
       try {
-        const apiKey = document.getElementById('apiKeyInput').value;
-        const res = await fetch(`${API_BASE}/v1/usage/${encodeURIComponent(clientId)}?days=${days}`, {
-          headers: { 'Authorization': `Bearer ${apiKey}` }
+        const [usageRes, topRes] = await Promise.all([
+          fetch(`${API_BASE}/v1/usage/${encodeURIComponent(clientId)}?range=${range}`, { headers: getAuth() }),
+          clientId === 'all' ? fetch(`${API_BASE}/v1/usage/top-denied?range=${range}`, { headers: getAuth() }) : Promise.resolve(null)
+        ]);
+
+        if (!usageRes.ok) return;
+        const data = await usageRes.json();
+        
+        const { totals } = data;
+        const denyRate = totals.totalRequests > 0 ? ((totals.denied / totals.totalRequests) * 100).toFixed(1) : '0.0';
+        
+        document.getElementById('statsBox').innerHTML = `
+          <div class="stat-card"><div class="label">Total Requests</div><div class="value highlight">${totals.totalRequests.toLocaleString()}</div></div>
+          <div class="stat-card"><div class="label">Allowed</div><div class="value" style="color: var(--success)">${totals.allowed.toLocaleString()}</div></div>
+          <div class="stat-card"><div class="label">Rate Limited (429)</div><div class="value" style="color: var(--danger)">${totals.denied.toLocaleString()}</div></div>
+          <div class="stat-card"><div class="label">Rejection Rate</div><div class="value highlight">${denyRate}%</div></div>
+        `;
+
+        if (topRes && topRes.ok) {
+           const topData = await topRes.json();
+           const lbContent = document.getElementById('leaderboardContent');
+           lbContent.classList.remove('skeleton');
+           if (topData.length === 0) {
+             lbContent.innerHTML = '<div style="color:var(--text-secondary); font-size: 0.85rem;">No denied requests in this period.</div>';
+           } else {
+             lbContent.innerHTML = topData.map(r => `
+               <div class="lb-row">
+                 <div class="lb-client">${r.clientId}</div>
+                 <div class="lb-val">${r.deniedCount.toLocaleString()} blocks</div>
+               </div>
+             `).join('');
+           }
+        }
+
+        document.getElementById('trafficChartWrapper').classList.remove('skeleton');
+        document.getElementById('latencyChartWrapper').classList.remove('skeleton');
+
+        const labels = data.timeline.map(d => {
+          const date = new Date(d.period);
+          if (range === '60m' || range === '24h') {
+             return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+          }
+          return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
         });
-        if (!res.ok) throw new Error(`API returned ${res.status}`);
-        const data = await res.json();
-        renderStats(data);
-        renderChart(data);
-      } catch (err) {
-        errorBox.textContent = `Failed to load usage: ${err.message}`;
+        
+        if (trafficChart) trafficChart.destroy();
+        trafficChart = new Chart(document.getElementById('trafficChart'), {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              { 
+                label: 'Allowed', data: data.timeline.map(d => d.allowed), 
+                borderColor: '#00e676', backgroundColor: 'transparent',
+                borderWidth: 2, fill: false, tension: 0.5, pointRadius: 0, pointHitRadius: 10
+              },
+              { 
+                label: 'Rate Limited', data: data.timeline.map(d => d.denied), 
+                borderColor: '#ff3b30', backgroundColor: 'transparent',
+                borderWidth: 2, fill: false, tension: 0.5, pointRadius: 0, pointHitRadius: 10
+              }
+            ],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'top', labels: { boxWidth: 8, usePointStyle: true } } },
+            scales: { x: { grid: { display: false } }, y: { grid: { color: '#222' }, beginAtZero: true } },
+          },
+        });
+
+        if (latencyChart) latencyChart.destroy();
+        latencyChart = new Chart(document.getElementById('latencyChart'), {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              { 
+                label: 'P95 Latency', data: data.timeline.map(d => d.p95LatencyMs), 
+                borderColor: '#ededed', backgroundColor: 'transparent',
+                borderWidth: 2, fill: false, tension: 0.5, pointRadius: 0, pointHitRadius: 10
+              }
+            ],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { display: false } },
+            scales: { x: { grid: { display: false } }, y: { grid: { color: '#222' }, beginAtZero: true } },
+          },
+        });
+
+      } catch (e) {
+        console.error(e);
       }
     }
 
-    function renderStats(data) {
-      const { totals } = data;
-      const denyRate = totals.totalRequests > 0
-        ? ((totals.denied / totals.totalRequests) * 100).toFixed(1)
-        : '0.0';
-      document.getElementById('statsBox').innerHTML = `
-        <div class="stat-card"><div class="label">Total Requests</div><div class="value">${totals.totalRequests.toLocaleString()}</div></div>
-        <div class="stat-card"><div class="label">Allowed</div><div class="value">${totals.allowed.toLocaleString()}</div></div>
-        <div class="stat-card"><div class="label">Denied (429)</div><div class="value">${totals.denied.toLocaleString()}</div></div>
-        <div class="stat-card"><div class="label">Deny Rate</div><div class="value">${denyRate}%</div></div>
-      `;
-    }
-
-    function renderChart(data) {
-      const ctx = document.getElementById('trendChart');
-      const labels = data.dailyTrend.map(d => new Date(d.day).toLocaleDateString());
-      const allowed = data.dailyTrend.map(d => d.allowed);
-      const denied = data.dailyTrend.map(d => d.denied);
-      const latency = data.dailyTrend.map(d => d.avgLatencyMs);
-
-      if (chart) chart.destroy();
-      chart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels,
-          datasets: [
-            { label: 'Allowed', data: allowed, backgroundColor: '#22c55e', yAxisID: 'y' },
-            { label: 'Denied', data: denied, backgroundColor: '#ef4444', yAxisID: 'y' },
-            { label: 'Avg latency (ms)', data: latency, type: 'line', borderColor: '#2563eb', backgroundColor: '#2563eb', yAxisID: 'y1', tension: 0.3 },
-          ],
-        },
-        options: {
-          responsive: true,
-          scales: {
-            y: { stacked: true, beginAtZero: true, title: { display: true, text: 'Requests' } },
-            y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: 'ms' } },
-          },
-        },
-      });
-    }
-
-    document.getElementById('refreshBtn').addEventListener('click', loadUsage);
+    document.getElementById('apiKeyInput').addEventListener('change', () => { refreshClientsData().then(loadUsage); });
     document.getElementById('clientSelect').addEventListener('change', loadUsage);
     document.getElementById('rangeSelect').addEventListener('change', loadUsage);
-
-    loadClients().then(loadUsage);
+    refreshClientsData().then(loadUsage);
   </script>
 </body>
 </html>

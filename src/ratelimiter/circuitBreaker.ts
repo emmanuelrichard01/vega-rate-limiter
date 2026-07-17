@@ -69,4 +69,11 @@ export class CircuitBreaker {
   getState(): BreakerState {
     return this.state;
   }
+
+  trip(durationMs: number = 10000): void {
+    this.state = 'OPEN';
+    this.consecutiveFailures = this.opts.failureThreshold;
+    this.openedAt = Date.now() + durationMs - this.opts.cooldownMs;
+    this.halfOpenInFlight = false;
+  }
 }

@@ -87,43 +87,175 @@ export function createApp(
     res.status(204).send();
   });
 
+  app.post('/v1/admin/trip-breaker', authMiddleware, (req, res) => {
+    limiter.simulateOutage(10000);
+    res.json({ status: 'breaker_tripped', durationMs: 10000 });
+  });
+
+  app.get('/v1/logs', authMiddleware, async (req, res) => {
+    try {
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 10));
+      const offset = (page - 1) * limit;
+
+      const clientIdParam = req.query.clientId as string;
+      const statusParam = req.query.status as string;
+
+      let whereClauses = [];
+      let params = [];
+      
+      if (clientIdParam && clientIdParam !== 'all') {
+        params.push(clientIdParam);
+        whereClauses.push(`client_id = $${params.length}`);
+      }
+      if (statusParam === 'allowed') {
+        whereClauses.push(`allowed = true`);
+      } else if (statusParam === 'denied') {
+        whereClauses.push(`allowed = false`);
+      }
+
+      const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+      const countResult = await pool.query(`SELECT COUNT(*) FROM request_log ${whereSql}`, params);
+      const total = parseInt(countResult.rows[0].count, 10);
+
+      const logsParams = [...params, limit, offset];
+      const limitParamIdx = params.length + 1;
+      const offsetParamIdx = params.length + 2;
+
+      const { rows } = await pool.query(
+        `SELECT id, client_id, allowed, latency_ms, source, occurred_at 
+         FROM request_log 
+         ${whereSql}
+         ORDER BY occurred_at DESC 
+         LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}`,
+         logsParams
+      );
+      
+      res.json({
+        data: rows,
+        meta: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit)
+        }
+      });
+    } catch (err) {
+      console.error('[api] GET /v1/logs failed', err);
+      res.status(500).json({ error: 'internal server error' });
+    }
+  });
+
   // --- dashboard: usage with filters -------------------------------
-  // GET /v1/usage/:clientId?days=10|15|30
+  app.get('/v1/usage/top-denied', async (req, res) => {
+    const range = req.query.range as string || '60m';
+    let intervalStr = '60 minutes';
+    if (range === '24h') intervalStr = '24 hours';
+    else if (range === '7d') intervalStr = '7 days';
+
+    try {
+      const { rows } = await pool.query(
+        `SELECT client_id, COUNT(*) as denied_count
+         FROM request_log
+         WHERE allowed = false AND occurred_at >= (now() - $1::interval)
+         GROUP BY client_id
+         ORDER BY denied_count DESC
+         LIMIT 5`,
+        [intervalStr]
+      );
+      res.json(rows.map(r => ({ clientId: r.client_id, deniedCount: Number(r.denied_count) })));
+    } catch (err) {
+      console.error('[api] GET /v1/usage/top-denied failed', err);
+      res.status(500).json({ error: 'internal server error' });
+    }
+  });
+
+  // GET /v1/usage/:clientId?range=60m|24h|7d
   app.get('/v1/usage/:clientId', async (req, res) => {
     const clientId = req.params.clientId as string;
-    const days = [10, 15, 30].includes(Number(req.query.days)) ? Number(req.query.days) : 10;
+    const range = req.query.range as string || '60m';
+    
+    let intervalStr = '60 minutes';
+    let truncUnit = 'minute';
+    if (range === '24h') {
+      intervalStr = '24 hours';
+      truncUnit = 'hour';
+    } else if (range === '7d') {
+      intervalStr = '7 days';
+      truncUnit = 'day';
+    }
 
-    const { rows } = await pool.query(
-      `SELECT day, total_requests, allowed_count, denied_count, avg_latency_ms
-       FROM usage_daily
-       WHERE client_id = $1 AND day >= (now() - ($2 || ' days')::interval)::date
-       ORDER BY day ASC`,
-      [clientId, days]
-    );
+    try {
+      let rows;
+      if (clientId === 'all') {
+        const result = await pool.query(
+          `SELECT 
+             date_trunc($1, occurred_at) as period, 
+             COUNT(*) as total_requests,
+             COUNT(CASE WHEN allowed = true THEN 1 END) as allowed_count,
+             COUNT(CASE WHEN allowed = false THEN 1 END) as denied_count,
+             PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) as p95_latency_ms
+           FROM request_log
+           WHERE occurred_at >= (now() - $2::interval)
+           GROUP BY date_trunc($1, occurred_at)
+           ORDER BY date_trunc($1, occurred_at) ASC`,
+          [truncUnit, intervalStr]
+        );
+        rows = result.rows;
+      } else {
+        const result = await pool.query(
+          `SELECT 
+             date_trunc($1, occurred_at) as period, 
+             COUNT(*) as total_requests,
+             COUNT(CASE WHEN allowed = true THEN 1 END) as allowed_count,
+             COUNT(CASE WHEN allowed = false THEN 1 END) as denied_count,
+             PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) as p95_latency_ms
+           FROM request_log
+           WHERE client_id = $3 AND occurred_at >= (now() - $2::interval)
+           GROUP BY date_trunc($1, occurred_at)
+           ORDER BY date_trunc($1, occurred_at) ASC`,
+          [truncUnit, intervalStr, clientId]
+        );
+        rows = result.rows;
+      }
 
-    const totals = rows.reduce(
-      (acc, r) => {
-        acc.totalRequests += Number(r.total_requests);
-        acc.allowed += Number(r.allowed_count);
-        acc.denied += Number(r.denied_count);
-        return acc;
-      },
-      { totalRequests: 0, allowed: 0, denied: 0 }
-    );
+      const totals = rows.reduce(
+        (acc, r) => {
+          acc.totalRequests += Number(r.total_requests);
+          acc.allowed += Number(r.allowed_count);
+          acc.denied += Number(r.denied_count);
+          return acc;
+        },
+        { totalRequests: 0, allowed: 0, denied: 0 }
+      );
 
-    res.json({
-      clientId,
-      rangeDays: days,
-      totals,
-      dailyTrend: rows.map((r) => ({
-        day: r.day,
-        totalRequests: Number(r.total_requests),
-        allowed: Number(r.allowed_count),
-        denied: Number(r.denied_count),
-        avgLatencyMs: Number(r.avg_latency_ms),
-      })),
-    });
+      res.json({
+        clientId,
+        range,
+        totals,
+        timeline: rows.map(r => ({
+          period: r.period,
+          totalRequests: Number(r.total_requests),
+          allowed: Number(r.allowed_count),
+          denied: Number(r.denied_count),
+          p95LatencyMs: r.p95_latency_ms ? Number(r.p95_latency_ms).toFixed(2) : 0
+        }))
+      });
+    } catch (err) {
+      console.error('[api] GET /v1/usage failed', err);
+      res.status(500).json({ error: 'internal server error' });
+    }
   });
+
+  // Daily cleanup of request logs older than 30 days
+  setInterval(async () => {
+    try {
+      await pool.query(`DELETE FROM request_log WHERE occurred_at < NOW() - INTERVAL '30 days'`);
+    } catch (err) {
+      console.error('[api] cleanup job failed', err);
+    }
+  }, 1000 * 60 * 60 * 24);
 
   return app;
 }
