@@ -211,10 +211,13 @@ of instances behind a load balancer rather than a single process.
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/v1/check` | `{ clientId, cost? }` → `{ allowed, remaining, retryAfterMs, source }`, plus `RateLimit-Limit`/`RateLimit-Remaining` headers on every response and `Retry-After` on a 429 |
-| `GET` | `/v1/clients` | list configured clients, their resolved limits, and `tierId` if inherited |
+| `GET` | `/v1/clients` | list configured active clients, their resolved limits, and `tierId` if inherited |
 | `PUT` | `/v1/clients/:clientId` | upsert a client: either `{ name, tierId }` to inherit a tier's limits, or `{ name, capacity, refillRatePerSec }` for a bespoke override (both together is valid too — the explicit numbers win) |
+| `DELETE` | `/v1/clients/:clientId` | soft-deletes a client by marking `active = false`, preserving historical usage logs. |
 | `GET` | `/v1/tiers` | list available tiers (`free`, `premium` by default) and their limits |
-| `GET` | `/v1/usage/:clientId?days=10\|15\|30` | aggregated usage for the dashboard |
+| `PUT` | `/v1/tiers/:tierId` | upsert a tier (`{ name, capacity, refillRatePerSec }`). Emits a Redis PubSub message to instantly invalidate affected clients in the LRU cache across all instances. |
+| `GET` | `/v1/usage?days=10\|15\|30` | aggregated global usage across all clients |
+| `GET` | `/v1/usage/:clientId?days=10\|15\|30` | aggregated usage for a specific client |
 | `GET` | `/healthz` | breaker state + log stream publish-failure count |
 | `GET` | `/dashboard/` | static usage dashboard (Chart.js) |
 
@@ -230,34 +233,27 @@ know or care whether a limit came from a tier or an override, so this
 added zero complexity to the actual rate-limiting logic.
 
 ```bash
-curl http://localhost:8080/v1/tiers -H 'Authorization: Bearer my-secret-key-123'
+curl http://localhost:8080/v1/tiers -H 'Authorization: Bearer my-admin-key-456'
 # [{"tierId":"free","capacity":100,...}, {"tierId":"premium","capacity":1000,...}]
 
 # new client, inherits the premium tier's limits entirely
 curl -X PUT http://localhost:8080/v1/clients/acme-corp \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer my-secret-key-123' \
+  -H 'Authorization: Bearer my-admin-key-456' \
   -d '{"name":"Acme Corp","tierId":"premium"}'
 
-# bump every premium client's limit in one place
-docker exec -it $(docker compose ps -q postgres) psql -U ratelimiter -d ratelimiter \
-  -c "UPDATE tiers SET capacity = 2000, refill_rate_per_sec = 2000.0/3600 WHERE tier_id = 'premium';"
+# bump every premium client's limit instantly across the cluster via the API
+curl -X PUT http://localhost:8080/v1/tiers/premium \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer my-admin-key-456' \
+  -d '{"name": "Premium Tier", "capacity": 2000, "refillRatePerSec": 0.55}'
 ```
 
 ## Known trade-offs / next steps
 
-- Client config refresh is poll-based (5s). Fine at this scale; a
-  Postgres `LISTEN/NOTIFY` or Redis pub/sub push would tighten
-  propagation delay if needed.
-- No mTLS/auth between services in this demo compose file — would add
-  an internal auth token or mesh in a real deployment.
-- Tier *assignment* per client is fully dynamic (`PUT /v1/clients`),
-  but tier *definitions* themselves (the numbers behind `free`/
-  `premium`) currently only change via direct SQL or a migration —
-  there's no `PUT /v1/tiers/:tierId` endpoint yet. Small, deliberately
-  deferred addition.
-- The Redis Stream is capped with an approximate `MAXLEN ~ 200000` on
+- **The Redis Stream Cap**: The Redis Stream is capped with an approximate `MAXLEN ~ 200000` on
   write, so a worker outage lasting long enough to exceed that would
   start losing the oldest unconsumed entries. Fine for this scale and
   timeline; a hard durability SLA would want either a much larger cap
-  with disk-backed Redis persistence (AOF) or a dedicated broker.
+  with disk-backed Redis persistence (AOF) or a dedicated broker like Kafka.
+- **Service Mesh Authentication**: While we now inject dual `SERVICE_API_KEY` and `ADMIN_API_KEY` to strictly segment hot-path execution vs admin management, a production deployment might further lock this down using mTLS or an internal service mesh (like Istio or Linkerd).
