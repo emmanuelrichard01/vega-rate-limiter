@@ -104,6 +104,8 @@ export class ClientConfigStore {
     }
   }
 
+  private pendingPromises = new Map<string, Promise<(LimitConfig & { tierId: string | null; name: string }) | undefined>>();
+
   async resolve(clientId: string): Promise<(LimitConfig & { tierId: string | null; name: string }) | undefined> {
     const existing = this.cache.get(clientId);
     if (existing) {
@@ -113,39 +115,51 @@ export class ClientConfigStore {
       return existing;
     }
 
-    const { rows } = await this.pool.query(
-      `SELECT
-         c.client_id,
-         c.name,
-         c.tier_id,
-         COALESCE(c.capacity, t.capacity) AS capacity,
-         COALESCE(c.refill_rate_per_sec, t.refill_rate_per_sec) AS refill_rate_per_sec
-       FROM clients c
-       LEFT JOIN tiers t ON c.tier_id = t.tier_id
-       WHERE c.client_id = $1 AND c.active = true`,
-      [clientId]
-    );
+    const pending = this.pendingPromises.get(clientId);
+    if (pending) return pending;
 
-    if (rows.length === 0) return undefined;
+    const promise = (async () => {
+      try {
+        const { rows } = await this.pool.query(
+          `SELECT
+             c.client_id,
+             c.name,
+             c.tier_id,
+             COALESCE(c.capacity, t.capacity) AS capacity,
+             COALESCE(c.refill_rate_per_sec, t.refill_rate_per_sec) AS refill_rate_per_sec
+           FROM clients c
+           LEFT JOIN tiers t ON c.tier_id = t.tier_id
+           WHERE c.client_id = $1 AND c.active = true`,
+          [clientId]
+        );
 
-    const r = rows[0];
-    const cfg = {
-      clientId: r.client_id,
-      name: r.name,
-      capacity: Number(r.capacity),
-      refillRatePerSec: Number(r.refill_rate_per_sec),
-      tierId: r.tier_id,
-    };
+        if (rows.length === 0) return undefined;
 
-    this.cache.set(clientId, cfg);
-    
-    // LRU Eviction: remove the oldest entry (first in Map iteration)
-    if (this.cache.size > this.MAX_CACHE_SIZE) {
-      const firstKey = this.cache.keys().next().value;
-      if (firstKey) this.cache.delete(firstKey);
-    }
+        const r = rows[0];
+        const cfg = {
+          clientId: r.client_id,
+          name: r.name,
+          capacity: Number(r.capacity),
+          refillRatePerSec: Number(r.refill_rate_per_sec),
+          tierId: r.tier_id,
+        };
 
-    return cfg;
+        this.cache.set(clientId, cfg);
+        
+        // LRU Eviction: remove the oldest entry (first in Map iteration)
+        if (this.cache.size > this.MAX_CACHE_SIZE) {
+          const firstKey = this.cache.keys().next().value;
+          if (firstKey) this.cache.delete(firstKey);
+        }
+
+        return cfg;
+      } finally {
+        this.pendingPromises.delete(clientId);
+      }
+    })();
+
+    this.pendingPromises.set(clientId, promise);
+    return promise;
   }
 
   async upsert(input: UpsertClientInput): Promise<void> {

@@ -978,9 +978,13 @@
       const runRequest = async () => {
         const start = performance.now();
         try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s hard timeout
           const res = await fetch(`${API_BASE}/v1/check`, {
-            method: 'POST', headers: { ...getAuth(), 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId, cost })
+            method: 'POST', headers: { ...getAuth(), 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId, cost }),
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
           totalLatency += (performance.now() - start);
           if (res.ok) allowed++; else denied++;
         } catch(e) { denied++; }
@@ -1003,6 +1007,7 @@
         
         // We use a non-blocking interval to fire requests exactly at the calculated rate
         let fired = 0;
+        const promises = [];
         await new Promise(resolve => {
           const trafficInterval = setInterval(() => {
             if (fired >= totalCount || (performance.now() - simStartTime) >= durationMs) {
@@ -1010,17 +1015,15 @@
               resolve();
               return;
             }
-            runRequest();
+            promises.push(runRequest());
             fired++;
           }, intervalMs);
         });
         
         totalCount = fired;
         
-        // Wait for any trailing requests to finish resolving before completing
-        while(sent < totalCount) {
-          await new Promise(r => setTimeout(r, 100));
-        }
+        // Wait for all trailing requests to finish resolving (or time out) before completing
+        await Promise.all(promises);
       }
 
       // Cleanup & Finalize
