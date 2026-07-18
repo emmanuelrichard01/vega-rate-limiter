@@ -32,52 +32,31 @@ export interface UpsertClientInput {
 export class ClientConfigStore {
   private cache = new Map<string, LimitConfig & { tierId: string | null; name: string }>();
   private timer?: ReturnType<typeof setInterval>;
-  private lastSync?: Date;
 
   constructor(private pool: Pool) {}
 
   async refresh(): Promise<void> {
-    const isFullSync = !this.lastSync;
-    const now = new Date();
-
-    let query = `
-      SELECT
+    const { rows } = await this.pool.query(
+      `SELECT
          c.client_id,
          c.name,
          c.tier_id,
          COALESCE(c.capacity, t.capacity) AS capacity,
          COALESCE(c.refill_rate_per_sec, t.refill_rate_per_sec) AS refill_rate_per_sec
-      FROM clients c
-      LEFT JOIN tiers t ON c.tier_id = t.tier_id
-    `;
-    const params: any[] = [];
-
-    if (!isFullSync) {
-      query += ` WHERE c.updated_at >= $1 OR t.updated_at >= $1`;
-      params.push(this.lastSync);
+       FROM clients c
+       LEFT JOIN tiers t ON c.tier_id = t.tier_id`
+    );
+    const next = new Map<string, LimitConfig & { tierId: string | null; name: string }>();
+    for (const r of rows) {
+      next.set(r.client_id, {
+        clientId: r.client_id,
+        name: r.name,
+        capacity: Number(r.capacity),
+        refillRatePerSec: Number(r.refill_rate_per_sec),
+        tierId: r.tier_id,
+      });
     }
-
-    const { rows } = await this.pool.query(query, params);
-
-    if (rows.length > 0 || isFullSync) {
-      const targetMap = isFullSync ? new Map() : this.cache;
-
-      for (const r of rows) {
-        targetMap.set(r.client_id, {
-          clientId: r.client_id,
-          name: r.name,
-          capacity: Number(r.capacity),
-          refillRatePerSec: Number(r.refill_rate_per_sec),
-          tierId: r.tier_id,
-        });
-      }
-
-      if (isFullSync) {
-        this.cache = targetMap;
-      }
-    }
-
-    this.lastSync = now;
+    this.cache = next;
   }
 
   startAutoRefresh(intervalMs = 5000) {
