@@ -288,7 +288,7 @@
             <div class="control-group">
               <label style="margin-bottom: 8px;">Master API Key</label>
               <div class="help-text" style="margin-bottom: 12px;">Used to authenticate with the administrative API.</div>
-              <input type="password" id="apiKeyInput" value="my-secret-key-123" placeholder="Bearer Token" />
+              <input type="password" id="apiKeyInput" value="" placeholder="Bearer Token" />
             </div>
           </div>
         </div>
@@ -586,7 +586,25 @@
       setTimeout(() => t.remove(), 4000);
     }
 
-    function getAuth() { return { 'Authorization': `Bearer ${document.getElementById('apiKeyInput').value}` }; }
+    let adminKey = sessionStorage.getItem('admin_api_key');
+    if (!adminKey) {
+      adminKey = prompt('Please enter the ADMIN_API_KEY to access the dashboard:');
+      if (adminKey) {
+        sessionStorage.setItem('admin_api_key', adminKey);
+      }
+    }
+    const apiInput = document.getElementById('apiKeyInput');
+    if (adminKey && apiInput) {
+      apiInput.value = adminKey;
+    }
+
+    function getAuth() { return { 'Authorization': `Bearer ${apiInput.value}` }; }
+
+    if (apiInput) {
+      apiInput.addEventListener('change', (e) => {
+        sessionStorage.setItem('admin_api_key', e.target.value);
+      });
+    }
 
     async function pollHealth() {
       try {
@@ -708,7 +726,7 @@
     }
 
     async function deleteClient(clientId) {
-      if(!confirm(`Are you sure you want to permanently delete the rate limits for ${clientId}? This cannot be undone.`)) return;
+      if (!confirm('Are you sure you want to deactivate this client? They will lose access immediately.')) return;
       try {
         const res = await fetch(`${API_BASE}/v1/clients/${encodeURIComponent(clientId)}`, {
           method: 'DELETE', headers: getAuth()
@@ -1045,8 +1063,10 @@
       document.getElementById('trafficChartWrapper').classList.add('skeleton');
       document.getElementById('latencyChartWrapper').classList.add('skeleton');
 
+      const isGlobal = clientId === 'all';
+      const fetchUrl = isGlobal ? `${API_BASE}/v1/usage?days=${range}` : `${API_BASE}/v1/usage/${encodeURIComponent(clientId)}?days=${range}`;
       try {
-        const usageRes = await fetch(`${API_BASE}/v1/usage/${encodeURIComponent(clientId)}?days=${range}`, { headers: getAuth() });
+        const usageRes = await fetch(fetchUrl, { headers: getAuth() });
 
         if (!usageRes.ok) return;
         const data = await usageRes.json();

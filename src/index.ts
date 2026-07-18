@@ -9,6 +9,10 @@ async function main() {
   const pool = createPool();
   await runMigrations(pool);
 
+  if (!process.env.SERVICE_API_KEY || !process.env.ADMIN_API_KEY) {
+    console.warn('⚠️  SERVICE_API_KEY or ADMIN_API_KEY not set — auth is effectively disabled or degraded');
+  }
+
   const redis = new Redis({
     host: process.env.REDIS_HOST ?? 'localhost',
     port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
@@ -38,6 +42,7 @@ async function main() {
   app.listen(port, () => console.log(`rate-limiter listening on :${port}`));
 
   process.on('SIGTERM', async () => {
+    clientStore.close();
     await pool.end();
     redis.disconnect();
     process.exit(0);

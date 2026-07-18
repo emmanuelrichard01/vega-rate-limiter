@@ -41,9 +41,11 @@ See `diagrams/architecture.png` for the full component diagram.
   are cached in-process via a **Read-Through LRU Cache**. When an
   admin updates a tier or client, a message is published via
   **Redis Pub/Sub** to invalidate the stale cache instantly across all
-  API instances. This eliminates the need for periodic database polling
-  and ensures cluster-wide `O(1)` memory consumption regardless of how
-  many millions of clients are stored.
+  API instances. This guarantees cluster-wide `O(1)` memory consumption regardless of how
+  many millions of clients are stored. As an ultimate safety net against
+  missed messages (e.g. from network partitions or direct SQL edits), a
+  background **Reconciliation Loop** sweeps active LRU entries against the
+  database every 60 seconds, guaranteeing eventual consistency.
 
 ## Verified behavior (not just claimed — see "What's actually been tested" below)
 
@@ -90,22 +92,22 @@ burst 100) and `client-b` (5000 req/min, burst 5000).
 ### Try it
 
 ```bash
-# allowed
+# allowed (uses Service key)
 curl -X POST http://localhost:8080/v1/check \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer my-secret-key-123' \
+  -H 'Authorization: Bearer my-service-key-123' \
   -d '{"clientId":"client-a"}'
 
 # drain the burst, then see a 429
 for i in $(seq 1 101); do
   curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8080/v1/check \
     -H 'Content-Type: application/json' \
-    -H 'Authorization: Bearer my-secret-key-123' \
+    -H 'Authorization: Bearer my-service-key-123' \
     -d '{"clientId":"client-a"}'
 done
 
-# usage dashboard data
-curl http://localhost:8080/v1/usage/client-a?days=10 -H 'Authorization: Bearer my-secret-key-123'
+# usage dashboard data (uses Admin key)
+curl http://localhost:8080/v1/usage?days=10 -H 'Authorization: Bearer my-admin-key-456'
 ```
 
 ### Verifying the fail-safe edge case yourself
@@ -114,7 +116,7 @@ curl http://localhost:8080/v1/usage/client-a?days=10 -H 'Authorization: Bearer m
 docker compose stop redis
 curl -X POST http://localhost:8080/v1/check \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer my-secret-key-123' \
+  -H 'Authorization: Bearer my-service-key-123' \
   -d '{"clientId":"client-a"}'
 # -> still 200/429 as appropriate, with "source": "fallback"
 curl http://localhost:8080/healthz   # -> "breaker": "OPEN"
@@ -130,7 +132,7 @@ docker compose stop worker1 worker2
 for i in $(seq 1 20); do
   curl -s -o /dev/null -X POST http://localhost:8080/v1/check \
     -H 'Content-Type: application/json' \
-    -H 'Authorization: Bearer my-secret-key-123' \
+    -H 'Authorization: Bearer my-service-key-123' \
     -d '{"clientId":"client-a"}'
 done
 docker exec -it $(docker compose ps -q redis) redis-cli xinfo groups stream:request_log

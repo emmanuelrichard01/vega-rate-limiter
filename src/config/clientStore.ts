@@ -29,6 +29,7 @@ export interface UpsertClientInput {
 export class ClientConfigStore {
   private cache = new Map<string, LimitConfig & { tierId: string | null; name: string }>();
   private subRedis?: Redis;
+  private pollInterval?: NodeJS.Timeout;
   private readonly MAX_CACHE_SIZE = 10000;
 
   constructor(private pool: Pool, private redis?: Redis) {
@@ -53,11 +54,51 @@ export class ClientConfigStore {
         }
       });
     }
+
+    this.pollInterval = setInterval(async () => {
+      const activeIds = Array.from(this.cache.keys());
+      if (activeIds.length === 0) return;
+      try {
+        const { rows } = await this.pool.query(
+          `SELECT
+             c.client_id,
+             c.name,
+             c.tier_id,
+             c.active,
+             COALESCE(c.capacity, t.capacity) AS capacity,
+             COALESCE(c.refill_rate_per_sec, t.refill_rate_per_sec) AS refill_rate_per_sec
+           FROM clients c
+           LEFT JOIN tiers t ON c.tier_id = t.tier_id
+           WHERE c.client_id = ANY($1)`,
+          [activeIds]
+        );
+        const latest = new Map(rows.map((r: any) => [r.client_id, r]));
+        for (const clientId of activeIds) {
+          const r = latest.get(clientId);
+          if (!r || !r.active) {
+            this.cache.delete(clientId);
+          } else {
+            const cached = this.cache.get(clientId);
+            if (cached) {
+               cached.name = r.name;
+               cached.capacity = Number(r.capacity);
+               cached.refillRatePerSec = Number(r.refill_rate_per_sec);
+               cached.tierId = r.tier_id;
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[clientStore] reconciliation failed', err);
+      }
+    }, 60000);
   }
 
   close() {
     if (this.subRedis) {
       this.subRedis.disconnect();
+    }
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
     }
   }
 
@@ -79,7 +120,7 @@ export class ClientConfigStore {
          COALESCE(c.refill_rate_per_sec, t.refill_rate_per_sec) AS refill_rate_per_sec
        FROM clients c
        LEFT JOIN tiers t ON c.tier_id = t.tier_id
-       WHERE c.client_id = $1`,
+       WHERE c.client_id = $1 AND c.active = true`,
       [clientId]
     );
 
@@ -115,10 +156,10 @@ export class ClientConfigStore {
     }
 
     await this.pool.query(
-      `INSERT INTO clients (client_id, name, tier_id, capacity, refill_rate_per_sec, updated_at)
-       VALUES ($1, $2, $3, $4, $5, now())
+      `INSERT INTO clients (client_id, name, tier_id, capacity, refill_rate_per_sec, updated_at, active)
+       VALUES ($1, $2, $3, $4, $5, now(), true)
        ON CONFLICT (client_id)
-       DO UPDATE SET name = $2, tier_id = $3, capacity = $4, refill_rate_per_sec = $5, updated_at = now()`,
+       DO UPDATE SET name = $2, tier_id = $3, capacity = $4, refill_rate_per_sec = $5, updated_at = now(), active = true`,
       [input.clientId, input.name, tierId, capacity, refillRatePerSec]
     );
     
@@ -126,6 +167,18 @@ export class ClientConfigStore {
       await this.redis.publish('config_invalidation', `client:${input.clientId}`);
     } else {
       this.cache.delete(input.clientId);
+    }
+  }
+
+  async delete(clientId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE clients SET active = false, updated_at = now() WHERE client_id = $1`,
+      [clientId]
+    );
+    if (this.redis) {
+      await this.redis.publish('config_invalidation', `client:${clientId}`);
+    } else {
+      this.cache.delete(clientId);
     }
   }
   
@@ -163,7 +216,8 @@ export class ClientConfigStore {
          COALESCE(c.capacity, t.capacity) AS capacity,
          COALESCE(c.refill_rate_per_sec, t.refill_rate_per_sec) AS refill_rate_per_sec
        FROM clients c
-       LEFT JOIN tiers t ON c.tier_id = t.tier_id`
+       LEFT JOIN tiers t ON c.tier_id = t.tier_id
+       WHERE c.active = true`
     );
     return rows.map((r) => ({
       clientId: r.client_id,
