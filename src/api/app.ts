@@ -172,7 +172,7 @@ export function createApp(
         return res.status(400).json({ error: 'refillRatePerSec must be a positive finite number' });
       }
     }
-    if (!tierId && (!capacity || !refillRatePerSec)) {
+    if (!tierId && (capacity === undefined || refillRatePerSec === undefined)) {
       return res.status(400).json({
         error: 'provide either tierId, or both capacity and refillRatePerSec',
       });

@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS clients (
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Every APPROVED request, for billing + analytics. Denials are not
+-- Every rate-limit decision is logged for analytics; approved requests provide the billing basis, while denied requests are retained for throttling analysis.
 -- billed but are counted separately below so clients can see how often
 -- they're getting throttled.
 CREATE TABLE IF NOT EXISTS request_log (
