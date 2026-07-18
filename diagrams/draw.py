@@ -64,7 +64,7 @@ arrow((rl2[0]+1.05, rl2[1]), (redis[0]+redis[2]/2, redis[1]+redis[3]))
 arrow((rl3[0]+1.05, rl3[1]), (redis[0]+redis[2]-0.5, redis[1]+redis[3]), rad=0.05)
 
 # Config store (client limits)
-cfg = box(8.6, 5.6, 2.4, 0.9, "Client Config\n(limits per client,\ncached in-process,\nTTL refresh)", C_STATE, fontsize=8)
+cfg = box(8.6, 5.6, 2.4, 0.9, "Client Config\n(incremental sync,\ncached in-process)", C_STATE, fontsize=8)
 arrow((rl3[0]+2.1, rl3[1]+0.45), (cfg[0], cfg[1]+0.45), label="reads")
 
 # Circuit breaker fallback note
@@ -72,18 +72,21 @@ ax.annotate("Redis unreachable \u2192 circuit opens \u2192\nnodes fail-safe to l
             xy=(1.65, 5.6), xytext=(0.1, 3.9), fontsize=7.5, color='#8a1f1f',
             arrowprops=dict(arrowstyle='->', color='#8a1f1f', lw=1.1, connectionstyle="arc3,rad=-0.2"))
 
-# Async logging path
-queue = box(3.4, 2.7, 2.2, 0.7, "Async Log Queue\n(in-proc buffer)", C_LOG, fontsize=8.5)
-arrow((rl2[0]+1.05, rl2[1]), (queue[0]+1.1, queue[1]+queue[3]), label="fire-and-forget\n(non-blocking)", fontsize=7, rad=0.15)
+# Async logging path (durable: Redis Stream + consumer group)
+queue = box(3.2, 2.7, 2.6, 0.7, "Redis Stream\nstream:request_log\n(XADD, durable)", C_LOG, fontsize=8)
+arrow((rl2[0]+1.05, rl2[1]), (queue[0]+1.3, queue[1]+queue[3]), label="fire-and-forget\n(non-blocking)", fontsize=7, rad=0.15)
 
-worker = box(3.4, 1.6, 2.2, 0.7, "Log Worker\n(batched writer)", C_LOG, fontsize=8.5)
-arrow((queue[0]+1.1, queue[1]), (worker[0]+1.1, worker[1]+worker[3]))
+worker = box(3.2, 1.6, 2.6, 0.7, "Log Worker x2\n(consumer group,\nXREADGROUP + XACK)", C_LOG, fontsize=7.5)
+arrow((queue[0]+1.3, queue[1]), (worker[0]+1.3, worker[1]+worker[3]))
+ax.annotate("worker crash \u2192 unacked entries\nstay pending \u2192 reclaimed via\nXAUTOCLAIM by the survivor",
+            xy=(3.2, 1.95), xytext=(0.05, 1.3), fontsize=7, color='#8a1f1f',
+            arrowprops=dict(arrowstyle='->', color='#8a1f1f', lw=1.0, connectionstyle="arc3,rad=-0.15"))
 
 pg = box(0.6, 0.5, 2.6, 0.7, "PostgreSQL\nrequest_log +\nusage aggregates", C_STATE, fontsize=8)
-arrow((worker[0], worker[1]+0.35), (pg[0]+2.6, pg[1]+0.5), rad=0.1)
+arrow((worker[0], worker[1]+0.35), (pg[0]+2.6, pg[1]+0.5), rad=0.1, label="batch INSERT,\nthen XACK", fontsize=7)
 
 # Dashboard API + frontend
-dapi = box(6.6, 1.6, 2.4, 0.7, "Dashboard API\n(filters: avg latency,\n10/15/30-day trend)", C_LOG, fontsize=8)
+dapi = box(6.6, 1.6, 2.4, 0.7, "Dashboard API\n(daily rollups,\n1/2/3-day trends)", C_LOG, fontsize=8)
 arrow((pg[0]+2.6, pg[1]+0.35), (dapi[0], dapi[1]+0.35), rad=-0.15, label="reads\naggregates")
 
 dash = box(9.6, 1.6, 2.2, 0.7, "Client Dashboard\n(web UI)", C_CLIENT, fontsize=8.5)
@@ -101,5 +104,5 @@ legend_elems = [
 ax.legend(handles=legend_elems, loc='lower right', bbox_to_anchor=(1.0, -0.02), fontsize=8, frameon=False)
 
 plt.tight_layout()
-plt.savefig('/home/claude/vega-rate-limiter/diagrams/architecture.png', dpi=170, bbox_inches='tight')
+plt.savefig('diagrams/architecture.png', dpi=170, bbox_inches='tight')
 print("saved")

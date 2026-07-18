@@ -7,6 +7,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
+    "worker": "ts-node src/worker.ts",
     "test": "jest --runInBand",
     "test:watch": "jest --watch",
     "loadtest": "ts-node test/loadtest.ts"

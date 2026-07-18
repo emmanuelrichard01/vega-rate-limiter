@@ -77,5 +77,35 @@ services:
       - api1
       - api2
 
+  # Consumer-group workers draining stream:request_log into Postgres.
+  # Two replicas for the same reason api1/api2 are two replicas: if one
+  # dies mid-batch, its unacked reads sit in the group's pending list
+  # and the survivor reclaims them (see StreamConsumer.reclaimStale) --
+  # nothing is lost, and log ingestion doesn't depend on any single
+  # process staying alive.
+  worker1:
+    build: .
+    command: ["node", "dist/worker.js"]
+    environment:
+      <<: *api_env
+      WORKER_ID: worker1
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  worker2:
+    build: .
+    command: ["node", "dist/worker.js"]
+    environment:
+      <<: *api_env
+      WORKER_ID: worker2
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:

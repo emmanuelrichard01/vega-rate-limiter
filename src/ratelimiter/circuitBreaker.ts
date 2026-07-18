@@ -70,10 +70,11 @@ export class CircuitBreaker {
     return this.state;
   }
 
-  trip(durationMs: number = 10000): void {
+  trip(durationMs: number): void {
     this.state = 'OPEN';
-    this.consecutiveFailures = this.opts.failureThreshold;
-    this.openedAt = Date.now() + durationMs - this.opts.cooldownMs;
+    // We adjust openedAt to be in the future so that (Date.now() - this.openedAt >= this.opts.cooldownMs)
+    // is false for exactly durationMs milliseconds.
+    this.openedAt = Date.now() + (durationMs - this.opts.cooldownMs);
     this.halfOpenInFlight = false;
   }
 }

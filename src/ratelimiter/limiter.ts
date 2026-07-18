@@ -64,12 +64,11 @@ export class RateLimiter {
   }
 
   private async withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-    return Promise.race([
-      p,
-      new Promise<T>((_, reject) =>
-        setTimeout(() => reject(new Error('redis_timeout')), ms)
-      ),
-    ]);
+    let timer: NodeJS.Timeout;
+    const timeout = new Promise<T>((_, reject) =>
+      timer = setTimeout(() => reject(new Error('redis_timeout')), ms)
+    );
+    return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
   }
 
   /**
@@ -102,7 +101,6 @@ export class RateLimiter {
           source: 'redis',
         };
       } catch (err) {
-        console.error('[RateLimiter] redis check failed:', err);
         this.breaker.onFailure();
         // fall through to fallback below
       }
@@ -115,11 +113,11 @@ export class RateLimiter {
     return this.breaker.getState();
   }
 
-  simulateOutage(durationMs = 10000) {
-    this.breaker.trip(durationMs);
-  }
-
   startFallbackSweeper(intervalMs = 60_000, maxIdleMs = 10 * 60_000) {
     return setInterval(() => this.fallback.sweep(maxIdleMs), intervalMs);
+  }
+
+  tripBreaker(durationMs = 10000) {
+    this.breaker.trip(durationMs);
   }
 }

@@ -2,9 +2,8 @@ import Redis from 'ioredis';
 import { createApp } from './api/app';
 import { RateLimiter } from './ratelimiter/limiter';
 import { ClientConfigStore } from './config/clientStore';
-import { LogQueue } from './logging/queue';
+import { LogStreamProducer } from './logging/streamProducer';
 import { createPool, runMigrations } from './storage/postgres';
-import { startRollupTimer } from './logging/rollup';
 
 async function main() {
   const pool = createPool();
@@ -18,20 +17,8 @@ async function main() {
   });
   redis.on('error', (err) => console.error('[redis] connection error', err.message));
 
-  const redisSubscriber = new Redis({
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
-  });
-  redisSubscriber.on('error', (err: any) => console.error('[redisSubscriber] connection error', err.message, err.command?.name));
-
-  const redisWorker = new Redis({
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
-  });
-  redisWorker.on('error', (err) => console.error('[redisWorker] connection error', err.message));
-
   const limiter = new RateLimiter(redis, {
-    redisTimeoutMs: 200,
+    redisTimeoutMs: 20,
     breakerFailureThreshold: 3,
     breakerCooldownMs: 2000,
   });
@@ -39,23 +26,21 @@ async function main() {
 
   const clientStore = new ClientConfigStore(pool);
   await clientStore.refresh();
-  clientStore.listenForUpdates(redisSubscriber);
+  clientStore.startAutoRefresh(5000);
 
-  const logQueue = new LogQueue(pool, redis, redisWorker, { batchSize: 500, flushIntervalMs: 1000 });
-  await logQueue.init();
-  logQueue.startFlusher();
+  // Publishes onto stream:request_log; a separate `worker` process (see
+  // src/worker.ts) consumes it into Postgres. The API replicas don't
+  // touch Postgres for logging at all anymore -- they only ever talk to
+  // Redis on the hot path, and the durable hand-off to Postgres is
+  // fully decoupled into its own service/failure domain.
+  const logStream = new LogStreamProducer(redis);
 
-  startRollupTimer(pool, 30_000);
-
-  const app = createApp(limiter, clientStore, logQueue, pool, redis);
+  const app = createApp(limiter, clientStore, logStream, pool);
   const port = parseInt(process.env.PORT ?? '3000', 10);
   app.listen(port, () => console.log(`rate-limiter listening on :${port}`));
 
   process.on('SIGTERM', async () => {
-    await logQueue.flush();
     await pool.end();
-    redisWorker.disconnect();
-    redisSubscriber.disconnect();
     redis.disconnect();
     process.exit(0);
   });

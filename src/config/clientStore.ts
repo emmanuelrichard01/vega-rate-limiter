@@ -1,31 +1,83 @@
 import { Pool } from 'pg';
 import { LimitConfig } from '../ratelimiter/types';
 
+export interface Tier {
+  tierId: string;
+  name: string;
+  capacity: number;
+  refillRatePerSec: number;
+}
+
+export interface UpsertClientInput {
+  clientId: string;
+  name: string;
+  tierId?: string | null;
+  capacity?: number | null;
+  refillRatePerSec?: number | null;
+}
+
 /**
  * Per-client limits live in Postgres (source of truth) but are cached
  * in-process so the hot path (`RateLimiter.check`) never does a DB
  * round-trip. A background refresh keeps the cache eventually
  * consistent (default: every 5s) across all rate-limiter instances.
+ *
+ * A client's effective limit is resolved as: its own capacity/rate if
+ * set, otherwise its tier's. This lets thousands of "free" clients
+ * share one definition (bump the tier once, every client on it moves
+ * together) while any individual client can still get bespoke numbers
+ * -- both mechanisms coexist, neither is special-cased in the
+ * RateLimiter itself, which only ever sees the resolved LimitConfig.
  */
 export class ClientConfigStore {
-  private cache = new Map<string, LimitConfig>();
+  private cache = new Map<string, LimitConfig & { tierId: string | null; name: string }>();
   private timer?: ReturnType<typeof setInterval>;
+  private lastSync?: Date;
 
   constructor(private pool: Pool) {}
 
   async refresh(): Promise<void> {
-    const { rows } = await this.pool.query(
-      'SELECT client_id, capacity, refill_rate_per_sec FROM clients'
-    );
-    const next = new Map<string, LimitConfig>();
-    for (const r of rows) {
-      next.set(r.client_id, {
-        clientId: r.client_id,
-        capacity: Number(r.capacity),
-        refillRatePerSec: Number(r.refill_rate_per_sec),
-      });
+    const isFullSync = !this.lastSync;
+    const now = new Date();
+
+    let query = `
+      SELECT
+         c.client_id,
+         c.name,
+         c.tier_id,
+         COALESCE(c.capacity, t.capacity) AS capacity,
+         COALESCE(c.refill_rate_per_sec, t.refill_rate_per_sec) AS refill_rate_per_sec
+      FROM clients c
+      LEFT JOIN tiers t ON c.tier_id = t.tier_id
+    `;
+    const params: any[] = [];
+
+    if (!isFullSync) {
+      query += ` WHERE c.updated_at >= $1 OR t.updated_at >= $1`;
+      params.push(this.lastSync);
     }
-    this.cache = next;
+
+    const { rows } = await this.pool.query(query, params);
+
+    if (rows.length > 0 || isFullSync) {
+      const targetMap = isFullSync ? new Map() : this.cache;
+
+      for (const r of rows) {
+        targetMap.set(r.client_id, {
+          clientId: r.client_id,
+          name: r.name,
+          capacity: Number(r.capacity),
+          refillRatePerSec: Number(r.refill_rate_per_sec),
+          tierId: r.tier_id,
+        });
+      }
+
+      if (isFullSync) {
+        this.cache = targetMap;
+      }
+    }
+
+    this.lastSync = now;
   }
 
   startAutoRefresh(intervalMs = 5000) {
@@ -37,40 +89,52 @@ export class ClientConfigStore {
     return this.timer;
   }
 
-  listenForUpdates(subscriber: import('ioredis').Redis) {
-    // Wait for the connection to be fully ready before subscribing to avoid
-    // conflicting with ioredis's internal INFO/READY commands on startup.
-    subscriber.on('ready', () => {
-      subscriber.subscribe('config:refresh', (err) => {
-        if (err) console.error('[clientStore] failed to subscribe', err);
-      });
-    });
-    subscriber.on('message', (channel, message) => {
-      if (channel === 'config:refresh') {
-        // message is the clientId that was updated, we could fetch just that one, 
-        // but for simplicity we can refresh the whole cache or just that client.
-        // Let's just call refresh() to keep it simple and ensure consistency.
-        this.refresh().catch(err => console.error('[clientStore] refresh failed via pubsub', err));
-      }
-    });
-  }
-
   get(clientId: string): LimitConfig | undefined {
     return this.cache.get(clientId);
   }
 
-  async upsert(cfg: LimitConfig, name: string): Promise<void> {
+  /**
+   * `tierId: null` explicitly clears a client's tier (falls back to its
+   * own capacity/rate, which must then be provided). `capacity`/
+   * `refillRatePerSec` left `undefined` means "don't touch this field";
+   * `null` means "clear it, inherit from the tier instead."
+   */
+  async upsert(input: UpsertClientInput): Promise<void> {
+    const capacity = input.capacity ?? null;
+    const refillRatePerSec = input.refillRatePerSec ?? null;
+    const tierId = input.tierId ?? null;
+
+    if (tierId === null && (capacity === null || refillRatePerSec === null)) {
+      throw new Error(
+        'a client needs either a tierId or both capacity and refillRatePerSec'
+      );
+    }
+
     await this.pool.query(
-      `INSERT INTO clients (client_id, name, capacity, refill_rate_per_sec, updated_at)
-       VALUES ($1, $2, $3, $4, now())
+      `INSERT INTO clients (client_id, name, tier_id, capacity, refill_rate_per_sec, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now())
        ON CONFLICT (client_id)
-       DO UPDATE SET name = $2, capacity = $3, refill_rate_per_sec = $4, updated_at = now()`,
-      [cfg.clientId, name, cfg.capacity, cfg.refillRatePerSec]
+       DO UPDATE SET name = $2, tier_id = $3, capacity = $4, refill_rate_per_sec = $5, updated_at = now()`,
+      [input.clientId, input.name, tierId, capacity, refillRatePerSec]
     );
-    this.cache.set(cfg.clientId, cfg);
+    // Re-resolve from the DB rather than compute the effective values
+    // in JS, so tier inheritance stays correct with a single code path.
+    await this.refresh();
   }
 
-  all(): LimitConfig[] {
+  async listTiers(): Promise<Tier[]> {
+    const { rows } = await this.pool.query(
+      'SELECT tier_id, name, capacity, refill_rate_per_sec FROM tiers ORDER BY capacity ASC'
+    );
+    return rows.map((r) => ({
+      tierId: r.tier_id,
+      name: r.name,
+      capacity: Number(r.capacity),
+      refillRatePerSec: Number(r.refill_rate_per_sec),
+    }));
+  }
+
+  all(): (LimitConfig & { tierId: string | null; name: string })[] {
     return [...this.cache.values()];
   }
 }

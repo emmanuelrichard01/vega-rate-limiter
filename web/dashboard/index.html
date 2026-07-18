@@ -134,20 +134,26 @@
   .panel-title { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 8px; }
   .panel-desc { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 24px; }
   
-  .controls-row { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 24px; }
-  .control-group { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 240px; }
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+  .controls-row { display: flex; gap: 24px; margin-bottom: 24px; flex-wrap: wrap; }
+  .control-group { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 240px; }
   
   label { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); display: flex; gap: 8px; align-items: center; }
-  .help-text { font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4; }
+  .help-text { font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4; margin-bottom: 4px; }
   
   input, select {
     background: var(--bg-color); border: 1px solid var(--surface-border);
     color: var(--text-primary); font-family: 'JetBrains Mono', monospace;
     font-size: 0.95rem; padding: 12px 16px; border-radius: 6px; outline: none; transition: border-color 0.2s;
-    width: 100%;
+    width: 100%; box-sizing: border-box;
   }
   input:focus, select:focus { border-color: var(--text-secondary); }
-  input:disabled { opacity: 0.5; cursor: not-allowed; }
+  input:disabled, select:disabled { opacity: 0.5; cursor: not-allowed; }
   select {
     appearance: none; padding-right: 32px;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23888888'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
@@ -157,10 +163,27 @@
 
   button.primary-btn {
     background: var(--text-primary); color: var(--bg-color); border: none;
-    padding: 12px 24px; border-radius: 6px; font-family: inherit; font-size: 0.95rem; font-weight: 600;
-    cursor: pointer; transition: opacity 0.2s; white-space: nowrap; margin-top: 8px; display: inline-block;
+    padding: 12px 24px; border-radius: 8px; font-family: inherit; font-size: 0.95rem; font-weight: 600;
+    cursor: pointer; transition: all 0.2s ease; white-space: nowrap; margin-top: 8px; display: inline-block;
   }
-  button.primary-btn:hover { opacity: 0.9; }
+  button.primary-btn:hover { 
+    opacity: 0.9; 
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1);
+  }
+  button.primary-btn:active { transform: translateY(0); }
+
+  /* Animated Collapsible Sections */
+  .animated-section {
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease, opacity 0.4s ease;
+  }
+  .animated-section.open {
+    max-height: 500px;
+    opacity: 1;
+  }
   button.primary-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   /* Analytics Grid */
@@ -253,7 +276,7 @@
           <span class="health-val status-closed" id="hwBreaker"><span class="pulse-dot green"></span>ACTIVE</span>
         </div>
         <div class="health-item">
-          <span class="health-label">Stream Queue</span>
+          <span class="health-label">Dropped Streams</span>
           <span class="health-val" id="hwQueue"><span class="pulse-dot green"></span>0</span>
         </div>
         <div style="position: relative;">
@@ -274,10 +297,9 @@
 
     <!-- Tabs -->
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab('tab-analytics')">Analytics</button>
+      <button class="tab-btn active" onclick="switchTab('tab-analytics')">Analytics & Trends</button>
       <button class="tab-btn" onclick="switchTab('tab-manage')">Manage Clients</button>
       <button class="tab-btn" onclick="switchTab('tab-tester')">Simulations</button>
-      <button class="tab-btn" onclick="switchTab('tab-live')">Live Activity</button>
     </div>
 
     <!-- TAB 1: Analytics -->
@@ -292,9 +314,10 @@
         <div class="control-group">
           <label>Time Range</label>
           <select id="rangeSelect">
-            <option value="60m">Last 60 Minutes (Minutely)</option>
-            <option value="24h">Last 24 Hours (Hourly)</option>
-            <option value="7d">Last 7 Days (Daily)</option>
+            <option value="3">Last 3 Days</option>
+            <option value="10">Last 10 Days</option>
+            <option value="15">Last 15 Days</option>
+            <option value="30" selected>Last 30 Days</option>
           </select>
         </div>
       </div>
@@ -306,18 +329,13 @@
         <div class="stat-card skeleton"><div class="label">Rejection Rate</div><div class="value">00000</div></div>
       </div>
 
-      <div class="leaderboard" id="leaderboardWidget">
-        <h3>Top Rate-Limited Clients (Deny Count)</h3>
-        <div id="leaderboardContent" class="skeleton" style="min-height: 100px;"></div>
-      </div>
-
       <div class="split-charts">
         <div class="chart-box">
           <h3>Traffic Volume</h3>
           <div class="chart-container-split skeleton" id="trafficChartWrapper"><canvas id="trafficChart"></canvas></div>
         </div>
         <div class="chart-box">
-          <h3>P95 Latency (ms)</h3>
+          <h3>Average Latency (ms)</h3>
           <div class="chart-container-split skeleton" id="latencyChartWrapper"><canvas id="latencyChart"></canvas></div>
         </div>
       </div>
@@ -334,7 +352,7 @@
           <button class="page-btn" id="btnCancelEdit" style="display: none;" onclick="resetClientForm()">Cancel Edit</button>
         </div>
         <form onsubmit="handleUpsert(event)" id="clientForm">
-          <div class="controls-row">
+          <div class="form-grid">
             <div class="control-group">
               <label>Client ID</label>
               <div class="help-text">A unique identifier (e.g., API key hash or tenant ID).</div>
@@ -346,16 +364,27 @@
               <input type="text" id="upName" required placeholder="e.g. ACME Corp" />
             </div>
           </div>
-          <div class="controls-row">
+          <div class="form-grid">
             <div class="control-group">
-              <label>Capacity (Max Burst)</label>
-              <div class="help-text">The maximum number of tokens this client can hold at once.</div>
-              <input type="number" id="upCap" required min="1" placeholder="e.g. 100" />
+              <label>Tier Selection</label>
+              <div class="help-text">Select a predefined tier, or use Custom.</div>
+              <select id="upTier" onchange="toggleCustomLimits()">
+                <option value="">Custom Limits</option>
+              </select>
             </div>
-            <div class="control-group">
-              <label>Refill Rate / Sec</label>
-              <div class="help-text">How many tokens are added every second.</div>
-              <input type="number" id="upRefill" required min="1" placeholder="e.g. 10" />
+          </div>
+          <div class="animated-section open" id="customLimitsGroup">
+            <div class="form-grid">
+              <div class="control-group">
+                <label>Capacity (Max Burst)</label>
+                <div class="help-text">The maximum number of tokens this client can hold at once.</div>
+                <input type="number" id="upCap" required min="1" placeholder="e.g. 100" />
+              </div>
+              <div class="control-group">
+                <label>Refill Rate / Sec</label>
+                <div class="help-text">How many tokens are added every second.</div>
+                <input type="number" id="upRefill" required min="1" placeholder="e.g. 10" />
+              </div>
             </div>
           </div>
           <button type="submit" class="primary-btn" id="btnSaveConfig">Save Configuration</button>
@@ -373,6 +402,7 @@
               <tr>
                 <th style="cursor: pointer;" onclick="sortClients('clientId')">Client ID <span id="sort-clientId"></span></th>
                 <th style="cursor: pointer;" onclick="sortClients('name')">Display Name <span id="sort-name"></span></th>
+                <th style="cursor: pointer;" onclick="sortClients('tierId')">Tier <span id="sort-tierId"></span></th>
                 <th style="cursor: pointer;" onclick="sortClients('capacity')">Capacity <span id="sort-capacity"></span></th>
                 <th style="cursor: pointer;" onclick="sortClients('refillRatePerSec')">Refill Rate <span id="sort-refillRatePerSec"></span></th>
                 <th style="text-align: right;">Actions</th>
@@ -397,7 +427,7 @@
         </div>
 
         <form onsubmit="handleSimulation(event)" id="simForm">
-          <div class="controls-row">
+          <div class="form-grid">
             <div class="control-group">
               <label>Simulation Profile</label>
               <div class="help-text">Select the type of traffic pattern.</div>
@@ -409,25 +439,40 @@
             <div class="control-group">
               <label>Target Client</label>
               <div class="help-text">The client ID to target.</div>
-              <select id="simClientSelect"></select>
+              <select id="simClientSelect" onchange="updateSimTargetSpecs()"></select>
+              <div id="simTargetSpecs" style="margin-top: 12px; padding: 12px; background: rgba(0, 122, 255, 0.05); border: 1px solid rgba(0, 122, 255, 0.2); border-radius: 6px; font-size: 0.85rem; display: flex; gap: 16px; align-items: center; justify-content: flex-start;">
+                <div style="color: var(--text-secondary);">Capacity: <span id="simTargetCap" class="highlight" style="color: var(--text-primary); font-weight: 500;">--</span></div>
+                <div style="color: var(--text-secondary);">Refill: <span id="simTargetRefill" class="highlight" style="color: var(--text-primary); font-weight: 500;">--</span></div>
+                <div style="color: var(--text-secondary);">Tier: <span id="simTargetTier" class="pill" style="background: var(--surface-color); border: 1px solid var(--surface-border);">--</span></div>
+              </div>
             </div>
           </div>
 
-          <div class="controls-row">
+          <div class="form-grid">
             <div class="control-group" id="groupTotalReq">
               <label>Total Requests</label>
               <div class="help-text">Total requests to execute.</div>
-              <input type="number" id="simCount" value="100" min="1" max="2000" />
+              <input type="number" id="simCount" value="100" min="1" max="10000" />
             </div>
-            <div class="control-group" id="groupRps" style="display: none;">
-              <label>Requests per Second (RPS)</label>
-              <div class="help-text">Rate to sustain the flow.</div>
-              <input type="number" id="simRps" value="10" min="1" max="100" />
+            <div class="control-group" id="groupDuration" style="display: none;">
+              <label>Duration (Seconds)</label>
+              <div class="help-text">How long to sustain the flow.</div>
+              <input type="number" id="simDuration" value="10" min="1" max="300" />
             </div>
             <div class="control-group">
               <label>Cost per Request</label>
               <div class="help-text">Tokens consumed per single request.</div>
               <input type="number" id="simCost" value="1" min="1" />
+            </div>
+          </div>
+          
+          <div class="animated-section" id="groupRps">
+            <div class="form-grid">
+              <div class="control-group">
+                <label>Requests per Second (RPS)</label>
+                <div class="help-text">Rate to sustain the flow.</div>
+                <input type="number" id="simRps" value="10" min="1" max="100" />
+              </div>
             </div>
           </div>
           
@@ -482,58 +527,6 @@
       </div>
     </div>
 
-    <!-- TAB 4: Live Activity -->
-    <div id="tab-live" class="tab-pane">
-      <div class="panel" style="padding: 0; overflow: hidden; border-radius: 8px;">
-        <div style="padding: 16px 24px; border-bottom: 1px solid var(--surface-border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
-          <h2 style="font-size: 1.1rem; font-weight: 600; margin: 0;">Request Logs</h2>
-          <div style="display: flex; gap: 16px; align-items: center;">
-            <select id="logClientFilter" style="padding: 6px 12px; font-size: 0.85rem; width: auto;" onchange="currentLogPage=1; fetchLiveLogs()">
-              <option value="all">All Clients</option>
-            </select>
-            <select id="logStatusFilter" style="padding: 6px 12px; font-size: 0.85rem; width: auto;" onchange="currentLogPage=1; fetchLiveLogs()">
-              <option value="all">All Statuses</option>
-              <option value="allowed">Allowed</option>
-              <option value="denied">Denied (429)</option>
-            </select>
-            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer; color: var(--text-secondary);">
-              <input type="checkbox" id="liveToggle" checked onchange="toggleLive()" style="width: auto; margin: 0;">
-              Live Auto-Refresh
-            </label>
-            <button class="primary-btn" style="padding: 6px 16px; margin: 0; font-size: 0.85rem;" onclick="fetchLiveLogs()">Refresh</button>
-          </div>
-        </div>
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Timestamp</th>
-                <th>Client ID</th>
-                <th>Status</th>
-                <th>Latency</th>
-                <th>Source</th>
-              </tr>
-            </thead>
-            <tbody id="liveLogBody">
-              <tr><td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 32px;">Waiting for traffic...</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div style="padding: 16px 24px; border-top: 1px solid var(--surface-border); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
-          <div id="pageInfo" style="font-size: 0.85rem; color: var(--text-secondary);">Showing 0-0 of 0</div>
-          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-            <select id="limitSelect" onchange="changeLimit()" style="width: auto; padding: 6px 32px 6px 12px; font-size: 0.85rem; margin-right: 16px;">
-              <option value="10">10 / page</option>
-              <option value="25">25 / page</option>
-              <option value="50">50 / page</option>
-            </select>
-            <button class="page-btn" id="btnPrev" onclick="changePage(-1)">Prev</button>
-            <span id="pageNumbers" style="display: flex; gap: 4px;"></span>
-            <button class="page-btn" id="btnNext" onclick="changePage(1)">Next</button>
-          </div>
-        </div>
-      </div>
-    </div>
 
   </div>
 
@@ -543,7 +536,6 @@
     const API_BASE = '';
     let trafficChart;
     let latencyChart;
-    let liveInterval = null;
 
     Chart.defaults.color = '#888888';
     Chart.defaults.font.family = "'Inter', sans-serif";
@@ -564,18 +556,10 @@
       document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
       document.getElementById(tabId).classList.add('active');
       event.target.classList.add('active');
-      
-      if (liveInterval) { clearInterval(liveInterval); liveInterval = null; }
 
       if (tabId === 'tab-analytics') loadUsage();
       if (tabId === 'tab-manage') refreshClientsData();
       if (tabId === 'tab-tester') refreshClientsData();
-      if (tabId === 'tab-live') { 
-        fetchLiveLogs(); 
-        liveInterval = setInterval(() => {
-          if (isLive) fetchLiveLogs();
-        }, 2000); 
-      }
     }
 
     function showToast(msg) {
@@ -623,10 +607,10 @@
              globalAlert.style.display = 'none';
           }
 
-          const qVal = data.logQueue?.buffered || 0;
+          const qVal = data.logStream?.failedPublishes || 0;
           let qColor = 'green';
-          if(qVal > 50) qColor = 'yellow';
-          if(qVal > 200) qColor = 'red';
+          if(qVal > 0) qColor = 'yellow';
+          if(qVal > 100) qColor = 'red';
           const qDot = `<span class="pulse-dot ${qColor}"></span>`;
           document.getElementById('hwQueue').innerHTML = `${qDot}${qVal.toLocaleString()}`;
         }
@@ -640,12 +624,25 @@
       btn.disabled = true;
       btn.textContent = 'Simulating...';
       try {
-        await fetch(`${API_BASE}/v1/admin/trip-breaker`, { method: 'POST', headers: getAuth() });
+        const res = await fetch(`${API_BASE}/v1/admin/trip-breaker`, { method: 'POST', headers: getAuth() });
+        if (!res.ok) throw new Error('Failed');
         showToast('Redis Failure Simulated. Breaker tripped for 10s.');
         pollHealth();
+
+        let timeLeft = 10;
+        btn.textContent = `Breaker Tripped (${timeLeft}s)...`;
+        const interval = setInterval(() => {
+          timeLeft--;
+          if (timeLeft <= 0) {
+            clearInterval(interval);
+            btn.disabled = false;
+            btn.textContent = ogText;
+          } else {
+            btn.textContent = `Breaker Tripped (${timeLeft}s)...`;
+          }
+        }, 1000);
       } catch (e) { 
         showErrorToast('Failed to trigger simulation.'); 
-      } finally {
         btn.disabled = false;
         btn.textContent = ogText;
       }
@@ -654,9 +651,35 @@
     // --- Manage Clients Logic ---
     let _allClients = [];
 
+    let _allTiers = [];
+    
+    function toggleCustomLimits() {
+      const tierId = document.getElementById('upTier').value;
+      const customGroup = document.getElementById('customLimitsGroup');
+      const capInput = document.getElementById('upCap');
+      const refillInput = document.getElementById('upRefill');
+      
+      if (tierId !== '') {
+        const t = _allTiers.find(x => x.tierId === tierId);
+        capInput.disabled = true;
+        refillInput.disabled = true;
+        customGroup.classList.remove('open');
+        if (t) {
+          capInput.value = t.capacity;
+          refillInput.value = t.refillRatePerSec;
+        }
+      } else {
+        capInput.disabled = false;
+        refillInput.disabled = false;
+        customGroup.classList.add('open');
+      }
+    }
+
     function resetClientForm() {
       document.getElementById('clientForm').reset();
       document.getElementById('upClientId').disabled = false;
+      document.getElementById('upTier').value = '';
+      toggleCustomLimits();
       document.getElementById('formTitle').textContent = 'Register New Client';
       document.getElementById('formDesc').textContent = 'Configure a new token bucket to control API usage.';
       document.getElementById('btnCancelEdit').style.display = 'none';
@@ -669,8 +692,12 @@
       document.getElementById('upClientId').value = c.clientId;
       document.getElementById('upClientId').disabled = true;
       document.getElementById('upName').value = c.name;
-      document.getElementById('upCap').value = c.capacity;
-      document.getElementById('upRefill').value = c.refillRatePerSec;
+      document.getElementById('upTier').value = c.tierId || '';
+      toggleCustomLimits();
+      if (!c.tierId) {
+        document.getElementById('upCap').value = c.capacity;
+        document.getElementById('upRefill').value = c.refillRatePerSec;
+      }
       
       document.getElementById('formTitle').textContent = `Updating Client: ${c.clientId}`;
       document.getElementById('formDesc').textContent = `Modify existing limits for ${c.name}.`;
@@ -706,11 +733,16 @@
       btn.textContent = 'Saving...';
       
       const id = document.getElementById('upClientId').value;
+      const tierId = document.getElementById('upTier').value;
       const body = {
-        name: document.getElementById('upName').value,
-        capacity: Number(document.getElementById('upCap').value),
-        refillRatePerSec: Number(document.getElementById('upRefill').value)
+        name: document.getElementById('upName').value
       };
+      if (tierId) {
+        body.tierId = tierId;
+      } else {
+        body.capacity = Number(document.getElementById('upCap').value);
+        body.refillRatePerSec = Number(document.getElementById('upRefill').value);
+      }
       try {
         const res = await fetch(`${API_BASE}/v1/clients/${encodeURIComponent(id)}`, {
           method: 'PUT', headers: { ...getAuth(), 'Content-Type': 'application/json' }, body: JSON.stringify(body)
@@ -775,9 +807,10 @@
           <tr>
             <td><span class="highlight">${c.clientId}</span></td>
             <td>${c.name}</td>
+            <td><span class="pill" style="${c.tierId ? 'background: rgba(0, 122, 255, 0.1); color: #007aff;' : 'background: var(--surface-color); color: var(--text-secondary);'} border: 1px solid var(--surface-border);">${c.tierId ? c.tierId : 'Custom'}</span></td>
             <td><span class="pill" style="background: var(--surface-color); border: 1px solid var(--surface-border);">${c.capacity.toLocaleString()}</span></td>
             <td><span class="pill" style="background: var(--surface-color); border: 1px solid var(--surface-border);">${c.refillRatePerSec.toLocaleString()} / sec</span></td>
-            <td style="text-align: right;">
+            <td style="text-align: right; white-space: nowrap;">
               <button class="page-btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="editClient('${c.clientId}')">Edit</button>
               <button class="page-btn" style="padding: 4px 8px; font-size: 0.75rem; color: var(--danger); border-color: rgba(255, 59, 48, 0.3);" onclick="deleteClient('${c.clientId}')">Delete</button>
             </td>
@@ -808,23 +841,20 @@
             }
         }
 
-        // Update live logs dropdown
-        const logSel = document.getElementById('logClientFilter');
-        if (logSel) {
-            const logCurrentVal = logSel.value;
-            const logOpts = `<option value="all">All Clients</option>` + clients.map(c => `<option value="${c.clientId}">${c.clientId}</option>`).join('');
-            logSel.innerHTML = logOpts;
-            if (logCurrentVal && (logCurrentVal === 'all' || clients.find(c => c.clientId === logCurrentVal))) logSel.value = logCurrentVal;
-        }
 
         // Update simulations dropdown
         const testSel = document.getElementById('simClientSelect');
         if (testSel) {
             const testCurrentVal = testSel.value;
-            const testOpts = clients.map(c => `<option value="${c.clientId}">${c.clientId}</option>`).join('');
+            const testOpts = clients.map(c => {
+              const displayName = c.name ? c.name : c.clientId;
+              return `<option value="${c.clientId}">${displayName}</option>`;
+            }).join('');
             testSel.innerHTML = testOpts;
             if (testCurrentVal && clients.find(c => c.clientId === testCurrentVal)) testSel.value = testCurrentVal;
             else if (clients.length > 0) testSel.value = clients[0].clientId;
+            
+            updateSimTargetSpecs();
         }
       } catch (e) {}
     }
@@ -832,9 +862,37 @@
     // --- Simulations Logic ---
     function toggleSimProfile() {
       const isSustained = document.getElementById('simProfile').value === 'sustained';
-      document.getElementById('groupRps').style.display = isSustained ? 'flex' : 'none';
+      const groupRps = document.getElementById('groupRps');
+      const groupTotalReq = document.getElementById('groupTotalReq');
+      const groupDuration = document.getElementById('groupDuration');
+      
       if(isSustained) {
-         document.getElementById('simCount').value = "50";
+        groupRps.classList.add('open');
+        groupTotalReq.style.display = 'none';
+        groupDuration.style.display = 'flex';
+      } else {
+        groupRps.classList.remove('open');
+        groupTotalReq.style.display = 'flex';
+        groupDuration.style.display = 'none';
+      }
+    }
+
+    function updateSimTargetSpecs() {
+      const clientId = document.getElementById('simClientSelect').value;
+      const c = _allClients.find(x => x.clientId === clientId);
+      if (!c) return;
+      document.getElementById('simTargetCap').textContent = c.capacity;
+      document.getElementById('simTargetRefill').textContent = c.refillRatePerSec + ' / s';
+      
+      const tierEl = document.getElementById('simTargetTier');
+      if (c.tierId) {
+        tierEl.textContent = c.tierId;
+        tierEl.style.background = 'rgba(0, 122, 255, 0.1)';
+        tierEl.style.color = '#007aff';
+      } else {
+        tierEl.textContent = 'Custom';
+        tierEl.style.background = 'var(--surface-color)';
+        tierEl.style.color = 'var(--text-secondary)';
       }
     }
 
@@ -858,9 +916,16 @@
 
       const profile = document.getElementById('simProfile').value;
       const clientId = document.getElementById('simClientSelect').value;
-      const totalCount = Number(document.getElementById('simCount').value);
       const cost = Number(document.getElementById('simCost').value);
       const rps = Number(document.getElementById('simRps').value);
+
+      let totalCount = 0;
+      if (profile === 'spike') {
+        totalCount = Number(document.getElementById('simCount').value);
+      } else {
+        const duration = Number(document.getElementById('simDuration').value);
+        totalCount = duration * rps;
+      }
 
       document.getElementById('simLiveDash').style.display = 'block';
       document.getElementById('simReportPanel').style.display = 'none';
@@ -877,15 +942,20 @@
 
       let sent = 0, allowed = 0, denied = 0;
       let totalLatency = 0;
+      let updateInterval;
+      let isSimulationFinished = false;
       
       const updateUI = () => {
          elProgText.textContent = `${sent} / ${totalCount}`;
-         elProgBar.style.width = `${(sent / totalCount) * 100}%`;
+         elProgBar.style.width = `${Math.min(100, (sent / totalCount) * 100)}%`;
          elSent.textContent = sent;
          elAllowed.textContent = allowed;
          elDenied.textContent = denied;
       };
       updateUI();
+
+      // Start decoupled telemetry updates
+      updateInterval = setInterval(updateUI, 100);
 
       const runRequest = async () => {
         const start = performance.now();
@@ -897,29 +967,46 @@
           if (res.ok) allowed++; else denied++;
         } catch(e) { denied++; }
         sent++;
-        if (sent % 10 === 0) updateUI();
       };
 
       const simStartTime = performance.now();
 
       if (profile === 'spike') {
-        const chunkSize = 25;
-        for (let i = 0; i < totalCount; i += chunkSize) {
-           const chunk = Math.min(chunkSize, totalCount - i);
-           await Promise.all(Array.from({length: chunk}).map(runRequest));
-           updateUI();
-        }
-      } else if (profile === 'sustained') {
-        const delayMs = 1000 / rps;
+        // Uncapped Burst: Fire all promises simultaneously without blocking
+        const promises = [];
         for (let i = 0; i < totalCount; i++) {
-           runRequest();
-           updateUI();
-           await new Promise(r => setTimeout(r, delayMs));
+          promises.push(runRequest());
         }
-        while (sent < totalCount) await new Promise(r => setTimeout(r, 50));
+        await Promise.all(promises);
+      } else if (profile === 'sustained') {
+        // Sustained: Fire exactly RPS per second using a tightly controlled interval
+        const intervalMs = 1000 / rps;
+        const durationMs = Number(document.getElementById('simDuration').value) * 1000;
+        
+        // We use a non-blocking interval to fire requests exactly at the calculated rate
+        await new Promise(resolve => {
+          let requestsFired = 0;
+          const trafficInterval = setInterval(() => {
+            if (requestsFired >= totalCount || (performance.now() - simStartTime) >= durationMs) {
+              clearInterval(trafficInterval);
+              resolve();
+              return;
+            }
+            runRequest();
+            requestsFired++;
+          }, intervalMs);
+        });
+        
+        // Wait for any trailing requests to finish resolving before completing
+        while(sent < totalCount) {
+          await new Promise(r => setTimeout(r, 100));
+        }
       }
 
+      // Cleanup & Finalize
+      clearInterval(updateInterval);
       updateUI();
+      
       const durationMs = performance.now() - simStartTime;
       const durationSec = durationMs / 1000;
 
@@ -948,97 +1035,6 @@
       showToast('Simulation complete.');
     }
 
-    // --- Pagination Logic ---
-    let currentLogPage = 1;
-    let currentLogLimit = 10;
-    let isLive = true;
-
-    function toggleLive() {
-      isLive = document.getElementById('liveToggle').checked;
-      if (isLive) {
-        currentLogPage = 1;
-        fetchLiveLogs();
-      }
-    }
-
-    function changeLimit() {
-      currentLogLimit = Number(document.getElementById('limitSelect').value);
-      currentLogPage = 1;
-      fetchLiveLogs();
-    }
-
-    function changePage(delta) {
-      currentLogPage += delta;
-      disableLive();
-      fetchLiveLogs();
-    }
-
-    function goToPage(p) {
-      currentLogPage = p;
-      disableLive();
-      fetchLiveLogs();
-    }
-
-    function disableLive() {
-      if (currentLogPage > 1) {
-        isLive = false;
-        document.getElementById('liveToggle').checked = false;
-      }
-    }
-
-    async function fetchLiveLogs() {
-      try {
-        const clientIdParam = document.getElementById('logClientFilter')?.value || 'all';
-        const statusParam = document.getElementById('logStatusFilter')?.value || 'all';
-        const res = await fetch(`${API_BASE}/v1/logs?page=${currentLogPage}&limit=${currentLogLimit}&clientId=${encodeURIComponent(clientIdParam)}&status=${statusParam}`, { headers: getAuth() });
-        if (!res.ok) return;
-        const { data, meta } = await res.json();
-        
-        const tbody = document.getElementById('liveLogBody');
-        if (data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 32px;">No records found matching filters.</td></tr>';
-          document.getElementById('pageInfo').textContent = 'Showing 0-0 of 0';
-          document.getElementById('pageNumbers').innerHTML = '';
-          return;
-        }
-        
-        tbody.innerHTML = data.map(r => {
-          let latColor = '';
-          const lat = Number(r.latency_ms);
-          if (lat > 20) latColor = 'color: var(--danger); font-weight: 600;';
-          else if (lat > 5) latColor = 'color: var(--warning); font-weight: 600;';
-          
-          return `
-            <tr>
-              <td style="color: var(--text-secondary)">${new Date(r.occurred_at).toLocaleTimeString()}</td>
-              <td><span class="highlight">${r.client_id}</span></td>
-              <td><span class="pill ${r.allowed ? 'green' : 'red'}">${r.allowed ? 'ALLOWED' : 'DENIED'}</span></td>
-              <td style="${latColor}">${lat.toFixed(2)}ms</td>
-              <td>${r.source}</td>
-            </tr>
-          `;
-        }).join('');
-
-        const start = (meta.page - 1) * meta.limit + 1;
-        const end = Math.min(meta.page * meta.limit, meta.total);
-        document.getElementById('pageInfo').textContent = `Showing ${start}-${end} of ${meta.total.toLocaleString()}`;
-        
-        document.getElementById('btnPrev').disabled = meta.page <= 1;
-        document.getElementById('btnNext').disabled = meta.page >= meta.totalPages;
-        
-        let pageHtml = '';
-        const startPage = Math.max(1, meta.page - 2);
-        const endPage = Math.min(meta.totalPages, startPage + 4);
-        for(let i = startPage; i <= endPage; i++) {
-          if (i === meta.page) {
-            pageHtml += `<button class="page-btn active">${i}</button>`;
-          } else {
-            pageHtml += `<button class="page-btn" onclick="goToPage(${i})">${i}</button>`;
-          }
-        }
-        document.getElementById('pageNumbers').innerHTML = pageHtml;
-      } catch (e) {}
-    }
 
     async function loadUsage() {
       const clientId = document.getElementById('clientSelect').value;
@@ -1048,21 +1044,9 @@
       document.querySelectorAll('#statsBox .stat-card').forEach(el => el.classList.add('skeleton'));
       document.getElementById('trafficChartWrapper').classList.add('skeleton');
       document.getElementById('latencyChartWrapper').classList.add('skeleton');
-      
-      const lbWidget = document.getElementById('leaderboardWidget');
-      if (clientId === 'all') {
-        lbWidget.classList.add('active');
-        document.getElementById('leaderboardContent').classList.add('skeleton');
-        document.getElementById('leaderboardContent').innerHTML = '';
-      } else {
-        lbWidget.classList.remove('active');
-      }
 
       try {
-        const [usageRes, topRes] = await Promise.all([
-          fetch(`${API_BASE}/v1/usage/${encodeURIComponent(clientId)}?range=${range}`, { headers: getAuth() }),
-          clientId === 'all' ? fetch(`${API_BASE}/v1/usage/top-denied?range=${range}`, { headers: getAuth() }) : Promise.resolve(null)
-        ]);
+        const usageRes = await fetch(`${API_BASE}/v1/usage/${encodeURIComponent(clientId)}?days=${range}`, { headers: getAuth() });
 
         if (!usageRes.ok) return;
         const data = await usageRes.json();
@@ -1070,39 +1054,47 @@
         const { totals } = data;
         const denyRate = totals.totalRequests > 0 ? ((totals.denied / totals.totalRequests) * 100).toFixed(1) : '0.0';
         
+        const denyRateFloat = parseFloat(denyRate);
+        let denyColorClass = 'highlight';
+        if (denyRateFloat > 10) denyColorClass = 'value'; // we can just use inline styles
+        let denyColorStyle = denyRateFloat > 10 ? 'color: var(--danger)' : (denyRateFloat > 5 ? 'color: var(--warning)' : 'color: var(--success)');
+
         document.getElementById('statsBox').innerHTML = `
           <div class="stat-card"><div class="label">Total Requests</div><div class="value highlight">${totals.totalRequests.toLocaleString()}</div></div>
           <div class="stat-card"><div class="label">Allowed</div><div class="value" style="color: var(--success)">${totals.allowed.toLocaleString()}</div></div>
           <div class="stat-card"><div class="label">Rate Limited (429)</div><div class="value" style="color: var(--danger)">${totals.denied.toLocaleString()}</div></div>
-          <div class="stat-card"><div class="label">Rejection Rate</div><div class="value highlight">${denyRate}%</div></div>
+          <div class="stat-card"><div class="label">Rejection Rate</div><div class="value" style="${denyColorStyle}">${denyRate}%</div></div>
         `;
-
-        if (topRes && topRes.ok) {
-           const topData = await topRes.json();
-           const lbContent = document.getElementById('leaderboardContent');
-           lbContent.classList.remove('skeleton');
-           if (topData.length === 0) {
-             lbContent.innerHTML = '<div style="color:var(--text-secondary); font-size: 0.85rem;">No denied requests in this period.</div>';
-           } else {
-             lbContent.innerHTML = topData.map(r => `
-               <div class="lb-row">
-                 <div class="lb-client">${r.clientId}</div>
-                 <div class="lb-val">${r.deniedCount.toLocaleString()} blocks</div>
-               </div>
-             `).join('');
-           }
-        }
 
         document.getElementById('trafficChartWrapper').classList.remove('skeleton');
         document.getElementById('latencyChartWrapper').classList.remove('skeleton');
 
-        const labels = data.timeline.map(d => {
-          const date = new Date(d.period);
-          if (range === '60m' || range === '24h') {
-             return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        const rangeDays = data.rangeDays || parseInt(document.getElementById('rangeSelect').value, 10);
+        const labels = [];
+        const allowedData = [];
+        const deniedData = [];
+        const latencyData = [];
+
+        const today = new Date();
+        // Generate dates from (today - rangeDays + 1) to today
+        for (let i = rangeDays - 1; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(d.getDate() - i);
+          const dateStr = d.toISOString().split('T')[0]; // "YYYY-MM-DD"
+          labels.push(d.toLocaleDateString());
+
+          // Check if data exists for this day
+          const dayData = data.dailyTrend.find(x => x.day.startsWith(dateStr));
+          if (dayData) {
+            allowedData.push(dayData.allowed);
+            deniedData.push(dayData.denied);
+            latencyData.push(dayData.avgLatencyMs);
+          } else {
+            allowedData.push(0);
+            deniedData.push(0);
+            latencyData.push(0);
           }
-          return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        });
+        }
         
         if (trafficChart) trafficChart.destroy();
         trafficChart = new Chart(document.getElementById('trafficChart'), {
@@ -1111,14 +1103,14 @@
             labels,
             datasets: [
               { 
-                label: 'Allowed', data: data.timeline.map(d => d.allowed), 
-                borderColor: '#00e676', backgroundColor: 'transparent',
-                borderWidth: 2, fill: false, tension: 0.5, pointRadius: 0, pointHitRadius: 10
+                label: 'Allowed', data: allowedData, 
+                borderColor: '#00e676', backgroundColor: 'rgba(0, 230, 118, 0.1)',
+                borderWidth: 2, fill: true, tension: 0.5, pointRadius: 0, pointHitRadius: 10
               },
               { 
-                label: 'Rate Limited', data: data.timeline.map(d => d.denied), 
-                borderColor: '#ff3b30', backgroundColor: 'transparent',
-                borderWidth: 2, fill: false, tension: 0.5, pointRadius: 0, pointHitRadius: 10
+                label: 'Rate Limited', data: deniedData, 
+                borderColor: '#ff3b30', backgroundColor: 'rgba(255, 59, 48, 0.1)',
+                borderWidth: 2, fill: true, tension: 0.5, pointRadius: 0, pointHitRadius: 10
               }
             ],
           },
@@ -1137,9 +1129,9 @@
             labels,
             datasets: [
               { 
-                label: 'P95 Latency', data: data.timeline.map(d => d.p95LatencyMs), 
-                borderColor: '#ededed', backgroundColor: 'transparent',
-                borderWidth: 2, fill: false, tension: 0.5, pointRadius: 0, pointHitRadius: 10
+                label: 'Avg Latency (ms)', data: latencyData, 
+                borderColor: '#007aff', backgroundColor: 'rgba(0, 122, 255, 0.1)',
+                borderWidth: 2, fill: true, tension: 0.5, pointRadius: 0, pointHitRadius: 10
               }
             ],
           },
@@ -1156,10 +1148,27 @@
       }
     }
 
-    document.getElementById('apiKeyInput').addEventListener('change', () => { refreshClientsData().then(loadUsage); });
+    async function refreshTiersData() {
+      try {
+        const res = await fetch(`${API_BASE}/v1/tiers`, { headers: getAuth() });
+        if (!res.ok) return;
+        _allTiers = await res.json();
+        const sel = document.getElementById('upTier');
+        if (sel) {
+           const currentVal = sel.value;
+           const opts = `<option value="">Custom Limits</option>` + _allTiers.map(t => `<option value="${t.tierId}">${t.name} (${t.capacity} cap, ${t.refillRatePerSec}/s)</option>`).join('');
+           sel.innerHTML = opts;
+           sel.value = currentVal;
+        }
+      } catch (e) {}
+    }
+
+    document.getElementById('apiKeyInput').addEventListener('change', () => { 
+        refreshTiersData().then(refreshClientsData).then(loadUsage); 
+    });
     document.getElementById('clientSelect').addEventListener('change', loadUsage);
     document.getElementById('rangeSelect').addEventListener('change', loadUsage);
-    refreshClientsData().then(loadUsage);
+    refreshTiersData().then(refreshClientsData).then(loadUsage);
   </script>
 </body>
 </html>
