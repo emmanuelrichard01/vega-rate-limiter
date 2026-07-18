@@ -44,7 +44,7 @@ export function createApp(
       return res.status(400).json({ error: 'clientId is required' });
     }
 
-    const cfg = clientStore.get(clientId);
+    const cfg = await clientStore.resolve(clientId);
     if (!cfg) {
       return res.status(404).json({ error: `unknown clientId: ${clientId}` });
     }
@@ -83,8 +83,8 @@ export function createApp(
   });
 
   // --- client admin -----------------------------------------------------
-  app.get('/v1/clients', authMiddleware, (_req, res) => {
-    res.json(clientStore.all());
+  app.get('/v1/clients', authMiddleware, async (_req, res) => {
+    res.json(await clientStore.all());
   });
 
   // Tiers let many clients share one limit definition instead of every

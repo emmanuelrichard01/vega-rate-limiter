@@ -24,9 +24,7 @@ async function main() {
   });
   limiter.startFallbackSweeper();
 
-  const clientStore = new ClientConfigStore(pool);
-  await clientStore.refresh();
-  clientStore.startAutoRefresh(5000);
+  const clientStore = new ClientConfigStore(pool, redis);
 
   // Publishes onto stream:request_log; a separate `worker` process (see
   // src/worker.ts) consumes it into Postgres. The API replicas don't

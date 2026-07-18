@@ -15,12 +15,21 @@ describe('ClientConfigStore tier resolution', () => {
   let pool: Pool;
   let store: ClientConfigStore;
 
+  let redis: any;
+
   beforeAll(async () => {
     pool = testPool();
-    store = new ClientConfigStore(pool);
+    const Redis = require('ioredis');
+    redis = new Redis({
+      host: process.env.REDIS_HOST ?? 'localhost',
+      port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
+    });
+    store = new ClientConfigStore(pool, redis);
   });
 
   afterAll(async () => {
+    store.close();
+    await redis.quit();
     await pool.query(`DELETE FROM clients WHERE client_id LIKE 'tier-test-%'`);
     await pool.end();
   });
@@ -40,7 +49,7 @@ describe('ClientConfigStore tier resolution', () => {
 
   it('a client on a tier with no override inherits the tier limits', async () => {
     await store.upsert({ clientId: 'tier-test-free-client', name: 'Free Client', tierId: 'free' });
-    const cfg = store.get('tier-test-free-client');
+    const cfg = await store.resolve('tier-test-free-client');
     expect(cfg?.capacity).toBe(100);
     expect(cfg?.refillRatePerSec).toBeCloseTo(100 / 3600, 5);
   });
@@ -53,7 +62,7 @@ describe('ClientConfigStore tier resolution', () => {
       capacity: 250,
       refillRatePerSec: 2.5,
     });
-    const cfg = store.get('tier-test-override-client');
+    const cfg = await store.resolve('tier-test-override-client');
     // explicit override wins even though a tier is also set
     expect(cfg?.capacity).toBe(250);
     expect(cfg?.refillRatePerSec).toBe(2.5);
@@ -70,13 +79,16 @@ describe('ClientConfigStore tier resolution', () => {
     await store.upsert({ clientId: 'tier-test-shared-b', name: 'Shared B', tierId: 'premium' });
 
     await pool.query(`UPDATE tiers SET capacity = 2000, refill_rate_per_sec = 2000.0/3600 WHERE tier_id = 'premium'`);
-    await store.refresh();
+    await store.broadcastTierUpdate('premium');
+    // Give pubsub a tiny moment
+    await new Promise(r => setTimeout(r, 50));
 
-    expect(store.get('tier-test-shared-a')?.capacity).toBe(2000);
-    expect(store.get('tier-test-shared-b')?.capacity).toBe(2000);
+    expect((await store.resolve('tier-test-shared-a'))?.capacity).toBe(2000);
+    expect((await store.resolve('tier-test-shared-b'))?.capacity).toBe(2000);
 
     // restore so other tests/demo data aren't affected
     await pool.query(`UPDATE tiers SET capacity = 1000, refill_rate_per_sec = 1000.0/3600 WHERE tier_id = 'premium'`);
-    await store.refresh();
+    await store.broadcastTierUpdate('premium');
+    await new Promise(r => setTimeout(r, 50));
   });
 });

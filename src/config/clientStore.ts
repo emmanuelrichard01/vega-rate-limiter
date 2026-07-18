@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import Redis from 'ioredis';
 import { LimitConfig } from '../ratelimiter/types';
 
 export interface Tier {
@@ -17,25 +18,58 @@ export interface UpsertClientInput {
 }
 
 /**
- * Per-client limits live in Postgres (source of truth) but are cached
- * in-process so the hot path (`RateLimiter.check`) never does a DB
- * round-trip. A background refresh keeps the cache eventually
- * consistent (default: every 5s) across all rate-limiter instances.
- *
- * A client's effective limit is resolved as: its own capacity/rate if
- * set, otherwise its tier's. This lets thousands of "free" clients
- * share one definition (bump the tier once, every client on it moves
- * together) while any individual client can still get bespoke numbers
- * -- both mechanisms coexist, neither is special-cased in the
- * RateLimiter itself, which only ever sees the resolved LimitConfig.
+ * Enterprise Config Store using a Read-Through LRU Cache + Redis Pub/Sub.
+ * 
+ * Instead of periodically polling the entire `clients` table (which OOMs at scale),
+ * this store holds up to MAX_CACHE_SIZE active clients in memory.
+ * Cache misses query Postgres directly. When any node calls `upsert()`, it
+ * publishes an invalidation message via Redis to instantly evict stale
+ * configs across the entire API cluster.
  */
 export class ClientConfigStore {
   private cache = new Map<string, LimitConfig & { tierId: string | null; name: string }>();
-  private timer?: ReturnType<typeof setInterval>;
+  private subRedis?: Redis;
+  private readonly MAX_CACHE_SIZE = 10000;
 
-  constructor(private pool: Pool) {}
+  constructor(private pool: Pool, private redis?: Redis) {
+    if (this.redis) {
+      this.subRedis = this.redis.duplicate();
+      this.subRedis.subscribe('config_invalidation').catch(err => 
+        console.error('[clientStore] subscribe failed', err)
+      );
+      this.subRedis.on('message', (channel, message) => {
+        if (channel === 'config_invalidation') {
+          if (message.startsWith('tier:')) {
+            const tierId = message.split(':')[1];
+            for (const [clientId, cfg] of this.cache.entries()) {
+              if (cfg.tierId === tierId) {
+                this.cache.delete(clientId);
+              }
+            }
+          } else if (message.startsWith('client:')) {
+            const clientId = message.split(':')[1];
+            this.cache.delete(clientId);
+          }
+        }
+      });
+    }
+  }
 
-  async refresh(): Promise<void> {
+  close() {
+    if (this.subRedis) {
+      this.subRedis.disconnect();
+    }
+  }
+
+  async resolve(clientId: string): Promise<(LimitConfig & { tierId: string | null; name: string }) | undefined> {
+    const existing = this.cache.get(clientId);
+    if (existing) {
+      // LRU logic: move recently accessed to the end of the Map
+      this.cache.delete(clientId);
+      this.cache.set(clientId, existing);
+      return existing;
+    }
+
     const { rows } = await this.pool.query(
       `SELECT
          c.client_id,
@@ -44,49 +78,40 @@ export class ClientConfigStore {
          COALESCE(c.capacity, t.capacity) AS capacity,
          COALESCE(c.refill_rate_per_sec, t.refill_rate_per_sec) AS refill_rate_per_sec
        FROM clients c
-       LEFT JOIN tiers t ON c.tier_id = t.tier_id`
+       LEFT JOIN tiers t ON c.tier_id = t.tier_id
+       WHERE c.client_id = $1`,
+      [clientId]
     );
-    const next = new Map<string, LimitConfig & { tierId: string | null; name: string }>();
-    for (const r of rows) {
-      next.set(r.client_id, {
-        clientId: r.client_id,
-        name: r.name,
-        capacity: Number(r.capacity),
-        refillRatePerSec: Number(r.refill_rate_per_sec),
-        tierId: r.tier_id,
-      });
+
+    if (rows.length === 0) return undefined;
+
+    const r = rows[0];
+    const cfg = {
+      clientId: r.client_id,
+      name: r.name,
+      capacity: Number(r.capacity),
+      refillRatePerSec: Number(r.refill_rate_per_sec),
+      tierId: r.tier_id,
+    };
+
+    this.cache.set(clientId, cfg);
+    
+    // LRU Eviction: remove the oldest entry (first in Map iteration)
+    if (this.cache.size > this.MAX_CACHE_SIZE) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey) this.cache.delete(firstKey);
     }
-    this.cache = next;
+
+    return cfg;
   }
 
-  startAutoRefresh(intervalMs = 5000) {
-    this.timer = setInterval(() => {
-      this.refresh().catch((err) =>
-        console.error('[clientStore] refresh failed', err)
-      );
-    }, intervalMs);
-    return this.timer;
-  }
-
-  get(clientId: string): LimitConfig | undefined {
-    return this.cache.get(clientId);
-  }
-
-  /**
-   * `tierId: null` explicitly clears a client's tier (falls back to its
-   * own capacity/rate, which must then be provided). `capacity`/
-   * `refillRatePerSec` left `undefined` means "don't touch this field";
-   * `null` means "clear it, inherit from the tier instead."
-   */
   async upsert(input: UpsertClientInput): Promise<void> {
     const capacity = input.capacity ?? null;
     const refillRatePerSec = input.refillRatePerSec ?? null;
     const tierId = input.tierId ?? null;
 
     if (tierId === null && (capacity === null || refillRatePerSec === null)) {
-      throw new Error(
-        'a client needs either a tierId or both capacity and refillRatePerSec'
-      );
+      throw new Error('a client needs either a tierId or both capacity and refillRatePerSec');
     }
 
     await this.pool.query(
@@ -96,9 +121,25 @@ export class ClientConfigStore {
        DO UPDATE SET name = $2, tier_id = $3, capacity = $4, refill_rate_per_sec = $5, updated_at = now()`,
       [input.clientId, input.name, tierId, capacity, refillRatePerSec]
     );
-    // Re-resolve from the DB rather than compute the effective values
-    // in JS, so tier inheritance stays correct with a single code path.
-    await this.refresh();
+    
+    if (this.redis) {
+      await this.redis.publish('config_invalidation', `client:${input.clientId}`);
+    } else {
+      this.cache.delete(input.clientId);
+    }
+  }
+  
+  // Method to manually broadcast a tier update (used when tiers are changed)
+  async broadcastTierUpdate(tierId: string): Promise<void> {
+    if (this.redis) {
+      await this.redis.publish('config_invalidation', `tier:${tierId}`);
+    } else {
+      for (const [clientId, cfg] of this.cache.entries()) {
+        if (cfg.tierId === tierId) {
+          this.cache.delete(clientId);
+        }
+      }
+    }
   }
 
   async listTiers(): Promise<Tier[]> {
@@ -113,7 +154,23 @@ export class ClientConfigStore {
     }));
   }
 
-  all(): (LimitConfig & { tierId: string | null; name: string })[] {
-    return [...this.cache.values()];
+  async all(): Promise<(LimitConfig & { tierId: string | null; name: string })[]> {
+    const { rows } = await this.pool.query(
+      `SELECT
+         c.client_id,
+         c.name,
+         c.tier_id,
+         COALESCE(c.capacity, t.capacity) AS capacity,
+         COALESCE(c.refill_rate_per_sec, t.refill_rate_per_sec) AS refill_rate_per_sec
+       FROM clients c
+       LEFT JOIN tiers t ON c.tier_id = t.tier_id`
+    );
+    return rows.map((r) => ({
+      clientId: r.client_id,
+      name: r.name,
+      capacity: Number(r.capacity),
+      refillRatePerSec: Number(r.refill_rate_per_sec),
+      tierId: r.tier_id,
+    }));
   }
 }
