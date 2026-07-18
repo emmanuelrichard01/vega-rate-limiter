@@ -86,14 +86,15 @@ export class StreamConsumer {
     const values: any[] = [];
     const rows: string[] = [];
     entries.forEach((e, i) => {
-      const base = i * 5;
-      rows.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`);
+      const base = i * 6;
+      rows.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`);
       values.push(
         e.fields.clientId,
         e.fields.allowed === '1',
         parseFloat(e.fields.latencyMs),
         e.fields.source,
-        new Date(e.fields.occurredAt)
+        new Date(e.fields.occurredAt),
+        e.id
       );
     });
 
@@ -102,7 +103,7 @@ export class StreamConsumer {
     // retried (by us on the next loop, or reclaimed by another
     // consumer if we die first).
     await this.pool.query(
-      `INSERT INTO request_log (client_id, allowed, latency_ms, source, occurred_at) VALUES ${rows.join(',')}`,
+      `INSERT INTO request_log (client_id, allowed, latency_ms, source, occurred_at, stream_id) VALUES ${rows.join(',')} ON CONFLICT (stream_id) DO NOTHING`,
       values
     );
 

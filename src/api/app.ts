@@ -76,7 +76,15 @@ export function createApp(
       return res.status(404).json({ error: `unknown clientId: ${clientId}` });
     }
 
-    const result = await limiter.check(cfg, cost ?? 1);
+    const requestCost = cost ?? 1;
+    if (typeof requestCost !== 'number' || !Number.isFinite(requestCost) || requestCost <= 0) {
+      return res.status(400).json({ error: 'cost must be a positive finite number' });
+    }
+    if (requestCost > cfg.capacity) {
+      return res.status(400).json({ error: 'cost cannot exceed bucket capacity' });
+    }
+
+    const result = await limiter.check(cfg, requestCost);
     const latencyMs = Number(process.hrtime.bigint() - start) / 1e6;
 
     // Fire-and-forget: never await the log write on the response path.
@@ -124,8 +132,14 @@ export function createApp(
   app.put('/v1/tiers/:tierId', adminAuth, async (req, res) => {
     const { tierId } = req.params;
     const { name, capacity, refillRatePerSec } = req.body ?? {};
-    if (!name || !capacity || !refillRatePerSec) {
-      return res.status(400).json({ error: 'name, capacity, and refillRatePerSec are required' });
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ error: 'name is required' });
+    }
+    if (typeof capacity !== 'number' || !Number.isFinite(capacity) || capacity <= 0) {
+      return res.status(400).json({ error: 'capacity must be a positive finite number' });
+    }
+    if (typeof refillRatePerSec !== 'number' || !Number.isFinite(refillRatePerSec) || refillRatePerSec <= 0) {
+      return res.status(400).json({ error: 'refillRatePerSec must be a positive finite number' });
     }
     try {
       await pool.query(
@@ -145,8 +159,18 @@ export function createApp(
   app.put('/v1/clients/:clientId', adminAuth, async (req, res) => {
     const { clientId } = req.params;
     const { name, tierId, capacity, refillRatePerSec } = req.body ?? {};
-    if (!name) {
+    if (!name || typeof name !== 'string') {
       return res.status(400).json({ error: 'name is required' });
+    }
+    if (capacity !== undefined) {
+      if (typeof capacity !== 'number' || !Number.isFinite(capacity) || capacity <= 0) {
+        return res.status(400).json({ error: 'capacity must be a positive finite number' });
+      }
+    }
+    if (refillRatePerSec !== undefined) {
+      if (typeof refillRatePerSec !== 'number' || !Number.isFinite(refillRatePerSec) || refillRatePerSec <= 0) {
+        return res.status(400).json({ error: 'refillRatePerSec must be a positive finite number' });
+      }
     }
     if (!tierId && (!capacity || !refillRatePerSec)) {
       return res.status(400).json({
