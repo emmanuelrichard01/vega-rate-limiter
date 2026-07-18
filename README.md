@@ -1,11 +1,28 @@
 # Global Rate Limiter as a Service
 
-A high-availability rate limiter for outbound calls to quota-constrained
+## Overview
+
+This project is a distributed, low-latency rate-limiting service for
+microservices that call quota-constrained third-party APIs.
+
+It provides:
+
+- globally coordinated per-client rate limits across API replicas
+- atomic token-bucket enforcement using Redis and Lua
+- fail-open degradation when Redis is temporarily unavailable
+- durable asynchronous request logging
+- crash-recoverable analytics ingestion
+- real-time usage analytics and trend reporting
+- Docker-based local deployment
+
+![Architecture Diagram](diagrams/architecture.png)
+
+## Application-level high availability with fail-open degradation
+
+An application-level high availability rate limiter with fail-open degradation for outbound calls to quota-constrained
 third-party APIs (banking, logistics, AI providers). Any number of
 service instances can query it; correctness does not depend on which
 instance answers.
-
-See `diagrams/architecture.png` for the full component diagram.
 
 ## Design summary
 
@@ -28,7 +45,7 @@ See `diagrams/architecture.png` for the full component diagram.
 - **Logging is fully decoupled from the hot path, and durable.**
   `POST /v1/check` never awaits a database write — it fires an `XADD`
   onto a Redis Stream (`stream:request_log`, `src/logging/streamProducer.ts`)
-  and returns immediately. A separate `worker` process
+  and returns immediately. If Redis is healthy but the stream publish fails, the request remains approved because availability is prioritized. The failure is recorded in a metric and exposed through `/healthz`. A separate `worker` process
   (`src/worker.ts` / `src/logging/streamConsumer.ts`) reads the stream
   via a **consumer group**, batch-inserts into Postgres, and only
   `XACK`s after the insert succeeds. If a worker dies between reading
@@ -45,7 +62,32 @@ See `diagrams/architecture.png` for the full component diagram.
   many millions of clients are stored. As an ultimate safety net against
   missed messages (e.g. from network partitions or direct SQL edits), a
   background **Reconciliation Loop** sweeps active LRU entries against the
-  database every 60 seconds, guaranteeing eventual consistency.
+  database every 60 seconds, providing eventual convergence in the normal case, including recovery from missed invalidation messages.
+
+  ```text
+  Client Request
+        │
+        ▼
+  LRU Cache
+        │
+        ├── HIT → Rate Limiter
+        │
+        └── MISS → PostgreSQL → Cache
+  ```
+
+  ```text
+  Admin Update
+        │
+        ▼
+  PostgreSQL
+        │
+        ▼
+  Redis Pub/Sub
+        │
+        ├── API 1 invalidates
+        ├── API 2 invalidates
+        └── API N invalidates
+  ```
 
 ## Verified behavior (not just claimed — see "What's actually been tested" below)
 
@@ -176,6 +218,8 @@ Runs 27 tests across six suites, all against **real** infrastructure
   live Redis: burst/deny, refill timing, per-client isolation,
   fractional cost, and a latency assertion (p50 < 5ms, p99 < 15ms for
   the check itself).
+  
+  *Performance Environment: Measured locally on a development machine with Redis running in Docker. Results are intended as reproducible local benchmarks rather than production capacity guarantees.*
 - `test/race.test.ts` — **the concurrency guarantee**: 8 simulated
   cluster nodes racing 300 concurrent requests against one 50-capacity
   bucket admit exactly 50.
