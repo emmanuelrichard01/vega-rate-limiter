@@ -1002,18 +1002,20 @@
         const durationMs = Number(document.getElementById('simDuration').value) * 1000;
         
         // We use a non-blocking interval to fire requests exactly at the calculated rate
+        let fired = 0;
         await new Promise(resolve => {
-          let requestsFired = 0;
           const trafficInterval = setInterval(() => {
-            if (requestsFired >= totalCount || (performance.now() - simStartTime) >= durationMs) {
+            if (fired >= totalCount || (performance.now() - simStartTime) >= durationMs) {
               clearInterval(trafficInterval);
               resolve();
               return;
             }
             runRequest();
-            requestsFired++;
+            fired++;
           }, intervalMs);
         });
+        
+        totalCount = fired;
         
         // Wait for any trailing requests to finish resolving before completing
         while(sent < totalCount) {
