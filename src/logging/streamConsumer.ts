@@ -156,8 +156,13 @@ export class StreamConsumer {
     while (this.running) {
       try {
         await this.runOnce();
-      } catch (err) {
-        console.error('[streamConsumer] cycle failed, retrying', err);
+      } catch (err: any) {
+        if (err && String(err.message).includes('NOGROUP')) {
+          console.warn('[streamConsumer] Group disappeared (stream deleted?), recreating...');
+          try { await this.ensureGroup(); } catch (e) {}
+        } else {
+          console.error('[streamConsumer] cycle failed, retrying', err);
+        }
         await new Promise((r) => setTimeout(r, 1000));
       }
     }
