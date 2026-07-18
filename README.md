@@ -207,8 +207,7 @@ npm run worker
 npm test
 ```
 
-Runs 27 tests across six suites, all against **real** infrastructure
-(no mocks for Redis or Postgres):
+Runs 36 tests across seven suites. The test suite combines real Redis/PostgreSQL integration tests with focused isolated API validation tests:
 
 - `test/fallback.test.ts` — local bucket algorithm: burst, refill,
   capacity cap, per-client isolation, idle sweep.
@@ -231,6 +230,9 @@ Runs 27 tests across six suites, all against **real** infrastructure
 - `test/clientTiers.test.ts` — tier inheritance, per-client override
   precedence, and that bumping a tier's numbers moves every client
   inheriting from it without touching their rows individually.
+- `test/validation.test.ts` — input validation checks for missing,
+  invalid, and negative numbers across the API layer, using isolated
+  mocks.
 
 Load/throughput test (needs a running server, see below):
 
