@@ -55,42 +55,44 @@ export class ClientConfigStore {
       });
     }
 
-    this.pollInterval = setInterval(async () => {
-      const activeIds = Array.from(this.cache.keys());
-      if (activeIds.length === 0) return;
-      try {
-        const { rows } = await this.pool.query(
-          `SELECT
-             c.client_id,
-             c.name,
-             c.tier_id,
-             c.active,
-             COALESCE(c.capacity, t.capacity) AS capacity,
-             COALESCE(c.refill_rate_per_sec, t.refill_rate_per_sec) AS refill_rate_per_sec
-           FROM clients c
-           LEFT JOIN tiers t ON c.tier_id = t.tier_id
-           WHERE c.client_id = ANY($1)`,
-          [activeIds]
-        );
-        const latest = new Map(rows.map((r: any) => [r.client_id, r]));
-        for (const clientId of activeIds) {
-          const r = latest.get(clientId);
-          if (!r || !r.active) {
-            this.cache.delete(clientId);
-          } else {
-            const cached = this.cache.get(clientId);
-            if (cached) {
-               cached.name = r.name;
-               cached.capacity = Number(r.capacity);
-               cached.refillRatePerSec = Number(r.refill_rate_per_sec);
-               cached.tierId = r.tier_id;
-            }
+    this.pollInterval = setInterval(() => this.reconcile(), 60000);
+  }
+
+  async reconcile(): Promise<void> {
+    const activeIds = Array.from(this.cache.keys());
+    if (activeIds.length === 0) return;
+    try {
+      const { rows } = await this.pool.query(
+        `SELECT
+           c.client_id,
+           c.name,
+           c.tier_id,
+           c.active,
+           COALESCE(c.capacity, t.capacity) AS capacity,
+           COALESCE(c.refill_rate_per_sec, t.refill_rate_per_sec) AS refill_rate_per_sec
+         FROM clients c
+         LEFT JOIN tiers t ON c.tier_id = t.tier_id
+         WHERE c.client_id = ANY($1)`,
+        [activeIds]
+      );
+      const latest = new Map(rows.map((r: any) => [r.client_id, r]));
+      for (const clientId of activeIds) {
+        const r = latest.get(clientId);
+        if (!r || !r.active) {
+          this.cache.delete(clientId);
+        } else {
+          const cached = this.cache.get(clientId);
+          if (cached) {
+             cached.name = r.name;
+             cached.capacity = Number(r.capacity);
+             cached.refillRatePerSec = Number(r.refill_rate_per_sec);
+             cached.tierId = r.tier_id;
           }
         }
-      } catch (err) {
-        console.error('[clientStore] reconciliation failed', err);
       }
-    }, 60000);
+    } catch (err) {
+      console.error('[clientStore] reconciliation failed', err);
+    }
   }
 
   close() {

@@ -114,8 +114,6 @@ describe('ClientConfigStore tier resolution and endpoints', () => {
   });
 
   it('changes via raw SQL with NO broadcast are eventually reconciled within the polling window', async () => {
-    jest.useFakeTimers();
-    
     await store.upsert({ clientId: 'tier-test-reconcile', name: 'Reconcile', tierId: 'premium' });
     // Warm the cache
     await store.resolve('tier-test-reconcile');
@@ -126,18 +124,13 @@ describe('ClientConfigStore tier resolution and endpoints', () => {
     // Immediately resolving should still yield the stale cache (1000 or whatever it was restored to)
     expect((await store.resolve('tier-test-reconcile'))?.capacity).toBe(1000);
 
-    // Fast-forward 65 seconds to trigger the setInterval reconciliation loop
-    jest.advanceTimersByTime(65000);
-    
-    // Let any async query operations finish (since setInterval callback is async)
-    // In jest with fake timers and async tasks, we must tick the microtask queue
-    await Promise.resolve();
+    // Instead of fake timers (which deadlock pg), manually trigger the internal reconciliation loop
+    await (store as any).reconcile();
 
     // Cache should now be refreshed
     expect((await store.resolve('tier-test-reconcile'))?.capacity).toBe(3000);
 
     // Restore and cleanup
-    jest.useRealTimers();
     await pool.query(`UPDATE tiers SET capacity = 1000 WHERE tier_id = 'premium'`);
   });
 
