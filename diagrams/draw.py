@@ -64,7 +64,7 @@ arrow((rl2[0]+1.05, rl2[1]), (redis[0]+redis[2]/2, redis[1]+redis[3]))
 arrow((rl3[0]+1.05, rl3[1]), (redis[0]+redis[2]-0.5, redis[1]+redis[3]), rad=0.05)
 
 # Config store (client limits)
-cfg = box(8.6, 5.6, 2.4, 0.9, "Client Config\n(incremental sync,\ncached in-process)", C_STATE, fontsize=8)
+cfg = box(8.6, 5.6, 2.4, 0.9, "Client Config\n(tiers + overrides,\nincremental sync)", C_STATE, fontsize=8)
 arrow((rl3[0]+2.1, rl3[1]+0.45), (cfg[0], cfg[1]+0.45), label="reads")
 
 # Circuit breaker fallback note
@@ -86,7 +86,7 @@ pg = box(0.6, 0.5, 2.6, 0.7, "PostgreSQL\nrequest_log +\nusage aggregates", C_ST
 arrow((worker[0], worker[1]+0.35), (pg[0]+2.6, pg[1]+0.5), rad=0.1, label="batch INSERT,\nthen XACK", fontsize=7)
 
 # Dashboard API + frontend
-dapi = box(6.6, 1.6, 2.4, 0.7, "Dashboard API\n(daily rollups,\n1/2/3-day trends)", C_LOG, fontsize=8)
+dapi = box(6.6, 1.6, 2.4, 0.7, "Dashboard API\n(daily rollups,\n3/10/15/30-day trends)", C_LOG, fontsize=8)
 arrow((pg[0]+2.6, pg[1]+0.35), (dapi[0], dapi[1]+0.35), rad=-0.15, label="reads\naggregates")
 
 dash = box(9.6, 1.6, 2.2, 0.7, "Client Dashboard\n(web UI)", C_CLIENT, fontsize=8.5)
