@@ -64,7 +64,7 @@ arrow((rl2[0]+1.05, rl2[1]), (redis[0]+redis[2]/2, redis[1]+redis[3]))
 arrow((rl3[0]+1.05, rl3[1]), (redis[0]+redis[2]-0.5, redis[1]+redis[3]), rad=0.05)
 
 # Config store (client limits)
-cfg = box(8.6, 5.6, 2.4, 0.9, "Client Config\n(tiers + overrides,\nincremental sync)", C_STATE, fontsize=8)
+cfg = box(8.6, 5.6, 2.4, 0.9, "Client Config\n(Read-Through LRU Cache\n+ Redis Pub/Sub)", C_STATE, fontsize=8)
 arrow((rl3[0]+2.1, rl3[1]+0.45), (cfg[0], cfg[1]+0.45), label="reads")
 
 # Circuit breaker fallback note

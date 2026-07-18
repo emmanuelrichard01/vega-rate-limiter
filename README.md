@@ -38,8 +38,12 @@ See `diagrams/architecture.png` for the full component diagram.
   A separate rollup job (`src/logging/rollup.ts`) pre-aggregates into
   `usage_daily` so dashboard trend queries never scan raw request logs.
 - **Config:** per-client limits live in Postgres (`clients` table) but
-  are cached in-process and refreshed on a 5s timer, so the check path
-  never does a DB round-trip either.
+  are cached in-process via a **Read-Through LRU Cache**. When an
+  admin updates a tier or client, a message is published via
+  **Redis Pub/Sub** to invalidate the stale cache instantly across all
+  API instances. This eliminates the need for periodic database polling
+  and ensures cluster-wide `O(1)` memory consumption regardless of how
+  many millions of clients are stored.
 
 ## Verified behavior (not just claimed — see "What's actually been tested" below)
 
